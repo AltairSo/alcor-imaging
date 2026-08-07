@@ -63,6 +63,14 @@ python -m pip install -e ".[dev,notebook]"
 pytest
 ```
 
+When updating an existing Colab installation, reinstall only this package so pip
+does not unnecessarily replace Colab's preinstalled scientific stack:
+
+```python
+%pip install -q --upgrade --force-reinstall --no-deps --no-cache-dir \
+  "alcor-imaging[notebook] @ git+https://github.com/AltairSo/alcor-imaging.git@main"
+```
+
 ## One-shot-color / Bayer workflow
 
 Do not send raw Bayer FITS frames through the mono workflow: that produces a
