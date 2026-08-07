@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "alcor-imaging"
+version = "0.1.0"
+description = "Research-grade, array-first astronomical image processing for Alcor"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Alcor" }]
+keywords = ["astronomy", "astrophotography", "fits", "image-processing", "telescope"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Astronomy",
+  "Typing :: Typed",
+]
+dependencies = [
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "astropy>=6.0",
+  "scikit-image>=0.22",
+  "astroalign>=2.6",
+  "tifffile>=2024.1.30",
+  "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+notebook = ["matplotlib>=3.8"]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "ruff>=0.6",
+]
+
+[project.urls]
+Repository = "https://github.com/iam-abbas/alcor-imaging"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/alcor_imaging"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
