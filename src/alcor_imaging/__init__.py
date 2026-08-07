@@ -23,9 +23,12 @@ from .enhance import local_contrast, unsharp_mask, wavelet_denoise
 from .export import quantize, write_png, write_tiff
 from .fits import read_fits, write_fits
 from .geometry import crop_to_overlap, overlap_bounds
+from .hdr import hdr_combine, hdr_combine_with_mask
 from .models import (
     CalibrationSet,
     Frame,
+    LRGBConfig,
+    LRGBResult,
     NarrowbandConfig,
     NarrowbandResult,
     OSCConfig,
@@ -36,7 +39,7 @@ from .models import (
     StackResult,
     StretchConfig,
 )
-from .pipeline import process_narrowband, process_osc
+from .pipeline import process_lrgb, process_narrowband, process_osc
 from .quality import FrameQuality, measure_frame
 from .registration import (
     apply_transform,
@@ -63,6 +66,8 @@ __all__ = [
     "CalibrationSet",
     "Frame",
     "FrameQuality",
+    "LRGBConfig",
+    "LRGBResult",
     "NarrowbandConfig",
     "NarrowbandResult",
     "OSCConfig",
@@ -86,6 +91,8 @@ __all__ = [
     "demosaic",
     "estimate_background",
     "estimate_transform",
+    "hdr_combine",
+    "hdr_combine_with_mask",
     "infer_bayer_pattern",
     "local_contrast",
     "luminance",
@@ -97,6 +104,7 @@ __all__ = [
     "normalize",
     "normalize_bayer_pattern",
     "overlap_bounds",
+    "process_lrgb",
     "process_narrowband",
     "process_osc",
     "quantize",
@@ -120,4 +128,4 @@ __all__ = [
     "write_tiff",
 ]
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"

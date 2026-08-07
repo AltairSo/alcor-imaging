@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "alcor-imaging"
-version = "0.2.1"
+version = "0.3.0"
 description = "Research-grade, array-first astronomical image processing for Alcor"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,6 +28,7 @@ dependencies = [
   "astroalign>=2.6",
   "tifffile>=2024.1.30",
   "pillow>=10.0",
+  "PyWavelets>=1.5",
 ]
 
 [project.optional-dependencies]

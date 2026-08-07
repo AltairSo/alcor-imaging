@@ -150,4 +150,13 @@ def stretch_rgb(
         raise ValueError("gamma must be positive.")
     if config.gamma != 1.0:
         result = np.power(np.clip(result, 0.0, None), config.gamma)
-    return soft_clip(result, knee=highlight_knee)
+    # Compress by the brightest channel so highlight rolloff preserves chromatic ratios.
+    peak = np.max(result, axis=-1)
+    compressed_peak = soft_clip(peak, knee=highlight_knee)
+    compression = np.divide(
+        compressed_peak,
+        peak,
+        out=np.zeros_like(peak),
+        where=peak > 1e-12,
+    )
+    return np.clip(result * compression[..., None], 0.0, 1.0).astype(np.float32)

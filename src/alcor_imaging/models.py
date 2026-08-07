@@ -66,7 +66,8 @@ class NarrowbandConfig:
     registration: RegistrationConfig = field(default_factory=RegistrationConfig)
     stacking: StackConfig = field(default_factory=StackConfig)
     stretch: StretchConfig = field(default_factory=StretchConfig)
-    palette: Literal["HOO", "SHO"] = "HOO"
+    palette: str = "HOO"
+    mixing_matrix: tuple[tuple[float, ...], ...] | None = None
     channel_boosts: tuple[float, ...] = ()
     crop_to_overlap: bool = True
     background_box_size: int | None = None
@@ -98,6 +99,41 @@ class OSCConfig:
     highlight_knee: float = 0.82
 
 
+@dataclass(frozen=True, slots=True)
+class LRGBConfig:
+    registration: RegistrationConfig = field(
+        default_factory=lambda: RegistrationConfig(downsample=4)
+    )
+    rgb_stretch: StretchConfig = field(
+        default_factory=lambda: StretchConfig(
+            black_percentile=0.2,
+            white_percentile=99.995,
+            asinh_strength=18.0,
+            shadow_protection=0.006,
+            gamma=0.88,
+        )
+    )
+    luminance_stretch: StretchConfig = field(
+        default_factory=lambda: StretchConfig(
+            black_percentile=0.2,
+            white_percentile=99.997,
+            asinh_strength=20.0,
+            shadow_protection=0.005,
+            gamma=0.88,
+        )
+    )
+    saturation_fraction: float = 0.98
+    saturation_level: float | None = None
+    saturation_dilation: int = 2
+    background_percentile: float = 20.0
+    crop_to_overlap: bool = True
+    white_balance: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    luminance_weight: float = 0.75
+    denoise_strength: float = 0.1
+    saturation: float = 1.12
+    highlight_knee: float = 0.78
+
+
 @dataclass(slots=True)
 class RegistrationRecord:
     index: int
@@ -116,6 +152,22 @@ class StackResult:
 
 
 @dataclass(slots=True)
+class ChannelIntegrationResult:
+    master: NDArray[np.float32]
+    accepted_indices: list[int]
+    rejected_indices: list[int]
+    registrations: list[RegistrationRecord]
+    unrecoverable_mask: NDArray[np.bool_] | None = None
+
+
+@dataclass(slots=True)
+class MasterAlignmentResult:
+    masters: dict[str, NDArray[np.float32]]
+    registrations: dict[str, RegistrationRecord]
+    reference: str
+
+
+@dataclass(slots=True)
 class NarrowbandResult:
     linear_channels: tuple[NDArray[np.float32], ...]
     masters: tuple[NDArray[np.float32], ...]
@@ -131,3 +183,15 @@ class OSCResult:
     rejected_indices: list[int]
     registrations: list[RegistrationRecord]
     bayer_pattern: str
+
+
+@dataclass(slots=True)
+class LRGBResult:
+    linear_luminance: NDArray[np.float32]
+    linear_rgb: NDArray[np.float32]
+    rgb: NDArray[np.float32]
+    channel_masters: dict[str, NDArray[np.float32]]
+    registrations: dict[str, list[RegistrationRecord]]
+    accepted_indices: dict[str, list[int]]
+    rejected_indices: dict[str, list[int]]
+    luminance_unrecoverable_mask: NDArray[np.bool_]

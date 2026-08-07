@@ -1,30 +1,38 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from os import PathLike
+from typing import TypeVar
 
 import numpy as np
+from scipy.ndimage import gaussian_filter
 
 from ._validation import FloatImage, as_float_image
 from .background import subtract_background
 from .calibration import calibrate
-from .color import adjust_saturation, apply_palette, channel_balance
+from .color import adjust_saturation, apply_luminance, apply_palette, channel_balance
 from .demosaic import demosaic, infer_bayer_pattern, normalize_bayer_pattern
 from .enhance import wavelet_denoise
 from .fits import read_fits
 from .geometry import crop_to_overlap, overlap_bounds
+from .hdr import hdr_combine, hdr_combine_with_mask
 from .models import (
     CalibrationSet,
     Frame,
     ImageSource,
+    LRGBConfig,
+    LRGBResult,
     NarrowbandConfig,
     NarrowbandResult,
     OSCConfig,
     OSCResult,
+    RegistrationRecord,
 )
-from .registration import register_image, register_rgb_many
+from .registration import register_image, register_many, register_rgb_many
 from .stacking import register_and_stack, stack_rgb
 from .stretch import stretch, stretch_rgb
+
+T = TypeVar("T")
 
 
 def _load_source(source: ImageSource) -> FloatImage:
@@ -236,4 +244,217 @@ def process_osc(
         rejected_indices=rejected,
         registrations=records,
         bayer_pattern=pattern,
+    )
+
+
+def _normalize_lrgb_key(value: str) -> str:
+    normalized = str(value).strip().upper()
+    aliases = {
+        "L": "L",
+        "LUM": "L",
+        "LUMINANCE": "L",
+        "R": "R",
+        "RED": "R",
+        "G": "G",
+        "GREEN": "G",
+        "B": "B",
+        "BLUE": "B",
+    }
+    if normalized not in aliases:
+        raise ValueError(f"Unknown LRGB channel {value!r}.")
+    return aliases[normalized]
+
+
+def _normalize_lrgb_mapping(mapping: Mapping[str, T]) -> dict[str, T]:
+    result: dict[str, T] = {}
+    for key, value in mapping.items():
+        normalized = _normalize_lrgb_key(key)
+        if normalized in result:
+            raise ValueError(f"More than one value was supplied for LRGB channel {normalized}.")
+        result[normalized] = value
+    return result
+
+
+def _saturation_level(frame: Frame) -> float:
+    for key in ("SATURATE", "SATLEVEL", "DATAMAX"):
+        value = frame.header.get(key)
+        if value is not None and float(value) > 0:
+            return float(value)
+    bitpix = int(frame.header.get("BITPIX", 0))
+    bzero = float(frame.header.get("BZERO", 0))
+    bscale = float(frame.header.get("BSCALE", 1))
+    if bitpix > 0:
+        if bzero == 2 ** (bitpix - 1):
+            return float(((2**bitpix) - 1) * bscale)
+        return float(((2 ** (bitpix - 1)) - 1) * bscale + bzero)
+    return float(np.nanmax(frame.data))
+
+
+def process_lrgb(
+    channels: Mapping[str, Sequence[ImageSource]],
+    *,
+    config: LRGBConfig | None = None,
+    exposures: Mapping[str, Sequence[float]] | None = None,
+    weights: Mapping[str, Sequence[float]] | None = None,
+) -> LRGBResult:
+    """Process mixed-exposure mono L/R/G/B masters into an HDR LRGB image.
+
+    Inputs must be grouped explicitly by filter. FITS ``EXPTIME``/``EXPOSURE`` values
+    are used unless ``exposures`` is supplied. For pre-stacked masters, pass effective
+    integration-time ``weights`` so deeper masters contribute proportionally.
+    """
+    config = config or LRGBConfig()
+    normalized_channels = _normalize_lrgb_mapping(channels)
+    if set(normalized_channels) != {"L", "R", "G", "B"}:
+        missing = sorted({"L", "R", "G", "B"} - set(normalized_channels))
+        raise ValueError(f"LRGB processing requires L, R, G, and B; missing {missing}.")
+    normalized_exposures = _normalize_lrgb_mapping(exposures) if exposures else {}
+    normalized_weights = _normalize_lrgb_mapping(weights) if weights else {}
+
+    masters: dict[str, FloatImage] = {}
+    registrations: dict[str, list[RegistrationRecord]] = {}
+    accepted_indices: dict[str, list[int]] = {}
+    rejected_indices: dict[str, list[int]] = {}
+    luminance_unrecoverable: np.ndarray | None = None
+
+    for channel in ("L", "R", "G", "B"):
+        sources = normalized_channels[channel]
+        if not sources:
+            raise ValueError(f"LRGB channel {channel} contains no images.")
+        frames = [_load_frame(source) for source in sources]
+        if channel in normalized_exposures:
+            channel_exposures = list(normalized_exposures[channel])
+        else:
+            channel_exposures = [
+                float(frame.header.get("EXPTIME", frame.header.get("EXPOSURE", 0)))
+                for frame in frames
+            ]
+        if len(channel_exposures) != len(frames) or any(
+            exposure <= 0 for exposure in channel_exposures
+        ):
+            raise ValueError(
+                f"Channel {channel} needs one positive exposure per image; "
+                "supply the exposures mapping when FITS metadata is incomplete."
+            )
+        channel_weights = (
+            list(normalized_weights[channel])
+            if channel in normalized_weights
+            else channel_exposures
+        )
+        if len(channel_weights) != len(frames):
+            raise ValueError(f"Channel {channel} needs one weight per image.")
+        reference_index = int(np.argmax(channel_exposures))
+        aligned, records = register_many(
+            [frame.data for frame in frames],
+            reference_index=reference_index,
+            config=config.registration,
+            on_error="reject",
+        )
+        accepted = [record.index for record in records if record.accepted]
+        rejected = [record.index for record in records if not record.accepted]
+        if not accepted:
+            raise RuntimeError(f"No {channel} images registered successfully.")
+        combine_kwargs = {
+            "weights": [channel_weights[index] for index in accepted],
+            "saturation_levels": [
+                config.saturation_level or _saturation_level(frames[index])
+                for index in accepted
+            ],
+            "saturation_fraction": config.saturation_fraction,
+            "saturation_dilation": config.saturation_dilation,
+            "background_percentile": config.background_percentile,
+        }
+        accepted_exposures = [channel_exposures[index] for index in accepted]
+        if channel == "L":
+            masters[channel], luminance_unrecoverable = hdr_combine_with_mask(
+                aligned,
+                accepted_exposures,
+                **combine_kwargs,
+            )
+        else:
+            masters[channel] = hdr_combine(
+                aligned,
+                accepted_exposures,
+                **combine_kwargs,
+            )
+        registrations[channel] = records
+        accepted_indices[channel] = accepted
+        rejected_indices[channel] = rejected
+
+    aligned_masters = [masters["L"]]
+    for channel in ("R", "G", "B"):
+        aligned, transform, _ = register_image(
+            masters[channel], masters["L"], config.registration
+        )
+        aligned_masters.append(aligned)
+        registrations[f"{channel}_to_L"] = [
+            RegistrationRecord(
+                index=0,
+                accepted=True,
+                rotation_degrees=float(np.degrees(transform.rotation)),
+                translation=tuple(float(value) for value in transform.translation),
+            )
+        ]
+    if config.crop_to_overlap:
+        row_slice, col_slice = overlap_bounds(aligned_masters)
+        aligned_masters = [
+            image[row_slice, col_slice].copy() for image in aligned_masters
+        ]
+        for image in aligned_masters:
+            finite = np.isfinite(image)
+            if not np.all(finite):
+                image[~finite] = np.nanmedian(image)
+        if luminance_unrecoverable is not None:
+            luminance_unrecoverable = luminance_unrecoverable[row_slice, col_slice]
+    linear_luminance, red, green, blue = aligned_masters
+    linear_rgb = np.stack((red, green, blue), axis=-1).astype(np.float32)
+    linear_rgb = channel_balance(linear_rgb, config.white_balance, clip=False)
+
+    display_rgb = stretch_rgb(
+        linear_rgb, config.rgb_stretch, highlight_knee=config.highlight_knee
+    )
+    if config.denoise_strength:
+        display_rgb = wavelet_denoise(display_rgb, strength=config.denoise_strength)
+    luminance_rgb = np.repeat(linear_luminance[..., None], 3, axis=-1)
+    display_luminance = stretch_rgb(
+        luminance_rgb,
+        config.luminance_stretch,
+        highlight_knee=config.highlight_knee,
+    )[..., 0]
+    if not 0 <= config.luminance_weight <= 1:
+        raise ValueError("luminance_weight must lie between 0 and 1.")
+    rgb_luminance = np.einsum(
+        "...c,c->...", display_rgb, (0.2126, 0.7152, 0.0722)
+    )
+    if luminance_unrecoverable is None:
+        luminance_reliability = np.ones_like(display_luminance)
+    else:
+        luminance_reliability = 1.0 - gaussian_filter(
+            luminance_unrecoverable.astype(np.float32), sigma=3.0
+        )
+    effective_luminance_weight = config.luminance_weight * luminance_reliability
+    target_luminance = (
+        effective_luminance_weight * display_luminance
+        + (1.0 - effective_luminance_weight) * rgb_luminance
+    )
+    display_rgb = apply_luminance(
+        display_rgb, target_luminance, ratio_limits=(0.5, 2.5)
+    )
+    display_rgb = adjust_saturation(display_rgb, config.saturation)
+    if luminance_unrecoverable is None:
+        luminance_unrecoverable = np.zeros_like(linear_luminance, dtype=bool)
+    return LRGBResult(
+        linear_luminance=linear_luminance,
+        linear_rgb=linear_rgb,
+        rgb=display_rgb,
+        channel_masters={
+            "L": linear_luminance,
+            "R": red,
+            "G": green,
+            "B": blue,
+        },
+        registrations=registrations,
+        accepted_indices=accepted_indices,
+        rejected_indices=rejected_indices,
+        luminance_unrecoverable_mask=luminance_unrecoverable,
     )

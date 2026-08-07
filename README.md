@@ -71,6 +71,33 @@ does not unnecessarily replace Colab's preinstalled scientific stack:
   "alcor-imaging[notebook] @ git+https://github.com/AltairSo/alcor-imaging.git@main"
 ```
 
+## Mixed-exposure LRGB workflow
+
+Mono-camera L/R/G/B masters are not Bayer data. Group them explicitly by filter and
+use `process_lrgb`. Mixed 60s/120s/300s masters are converted to flux rate and merged
+as HDR data: saturated long-exposure pixels are excluded, shorter exposures recover
+bright structure, and integration-time weights preserve the depth of larger stacks.
+
+```python
+result = ai.process_lrgb(
+    {"L": luminance_paths, "R": red_paths, "G": green_paths, "B": blue_paths},
+    weights={
+        "L": luminance_integration_seconds,
+        "R": red_integration_seconds,
+        "G": green_integration_seconds,
+        "B": blue_integration_seconds,
+    },
+    config=ai.LRGBConfig(
+        white_balance=(1.04, 1.0, 1.08),
+        luminance_weight=0.72,
+        highlight_knee=0.74,
+    ),
+)
+```
+
+The complete 653-minute M42 example, including its subframe-count weighting table,
+is in `examples/colab_lrgb_m42.py`.
+
 ## One-shot-color / Bayer workflow
 
 Do not send raw Bayer FITS frames through the mono workflow: that produces a
@@ -240,6 +267,7 @@ src/alcor_imaging/
   stacking.py     robust frame integration
   background.py   background modeling and subtraction
   geometry.py     common-overlap handling
+  hdr.py          saturation-aware mixed-exposure integration
   stretch.py      normalization and nonlinear transfer functions
   color.py        palettes, channel mixing, luminance, saturation
   enhance.py      denoising, sharpening, local contrast
