@@ -74,6 +74,30 @@ class NarrowbandConfig:
     saturation: float = 1.0
 
 
+@dataclass(frozen=True, slots=True)
+class OSCConfig:
+    registration: RegistrationConfig = field(default_factory=RegistrationConfig)
+    stacking: StackConfig = field(default_factory=StackConfig)
+    stretch: StretchConfig = field(
+        default_factory=lambda: StretchConfig(
+            black_percentile=0.2,
+            white_percentile=99.99,
+            asinh_strength=10.0,
+            shadow_protection=0.008,
+            gamma=0.95,
+        )
+    )
+    bayer_pattern: Literal["RGGB", "BGGR", "GRBG", "GBRG"] | None = None
+    demosaic_method: Literal["malvar", "bilinear"] = "malvar"
+    reference_index: int = 0
+    crop_to_overlap: bool = True
+    background_box_size: int | None = None
+    white_balance: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    denoise_strength: float = 0.2
+    saturation: float = 1.1
+    highlight_knee: float = 0.82
+
+
 @dataclass(slots=True)
 class RegistrationRecord:
     index: int
@@ -97,3 +121,13 @@ class NarrowbandResult:
     masters: tuple[NDArray[np.float32], ...]
     rgb: NDArray[np.float32]
     stacks: tuple[StackResult, ...]
+
+
+@dataclass(slots=True)
+class OSCResult:
+    linear_rgb: NDArray[np.float32]
+    rgb: NDArray[np.float32]
+    accepted_indices: list[int]
+    rejected_indices: list[int]
+    registrations: list[RegistrationRecord]
+    bayer_pattern: str

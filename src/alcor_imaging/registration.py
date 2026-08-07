@@ -11,6 +11,18 @@ from ._validation import FloatImage, as_float_image, finite_values
 from .models import RegistrationConfig, RegistrationRecord
 
 
+def _as_rgb_image(image: ArrayLike) -> FloatImage:
+    data = as_float_image(image, ndim=3)
+    if data.shape[-1] != 3:
+        raise ValueError("RGB images must have three channels on the last axis.")
+    return data
+
+
+def _registration_luminance(rgb: ArrayLike) -> FloatImage:
+    data = _as_rgb_image(rgb)
+    return np.einsum("...c,c->...", data, (0.2126, 0.7152, 0.0722)).astype(np.float32)
+
+
 def registration_stretch(
     image: ArrayLike,
     *,
@@ -143,6 +155,95 @@ def register_many(
                 accepted=True,
                 rotation_degrees=float(np.degrees(transform.rotation)),
                 translation=translation,
+            )
+        )
+    return aligned, records
+
+
+def apply_transform_rgb(
+    source: ArrayLike,
+    reference: ArrayLike,
+    transform: SimilarityTransform,
+    *,
+    fill_value: float = np.nan,
+) -> tuple[FloatImage, np.ndarray]:
+    """Apply one spatial transform identically to every RGB channel."""
+    source_data = _as_rgb_image(source)
+    reference_data = _as_rgb_image(reference)
+    if source_data.shape != reference_data.shape:
+        raise ValueError("Source and reference RGB images must have matching shapes.")
+    reference_luminance = _registration_luminance(reference_data)
+    channels = []
+    footprints = []
+    for channel in range(3):
+        aligned, footprint = apply_transform(
+            source_data[..., channel],
+            reference_luminance,
+            transform,
+            fill_value=fill_value,
+        )
+        channels.append(aligned)
+        footprints.append(footprint)
+    invalid = np.logical_or.reduce(footprints)
+    result = np.stack(channels, axis=-1).astype(np.float32)
+    result[invalid] = fill_value
+    return result, invalid
+
+
+def register_rgb_many(
+    images: Sequence[ArrayLike],
+    *,
+    reference_index: int = 0,
+    config: RegistrationConfig | None = None,
+    on_error: str = "reject",
+) -> tuple[list[FloatImage], list[RegistrationRecord]]:
+    """Register RGB frames from luminance while preserving identical channel geometry."""
+    config = config or RegistrationConfig()
+    if not images:
+        raise ValueError("At least one RGB image is required.")
+    if not 0 <= reference_index < len(images):
+        raise IndexError("reference_index is outside the image sequence.")
+    if on_error not in {"reject", "raise"}:
+        raise ValueError("on_error must be 'reject' or 'raise'.")
+    prepared = [_as_rgb_image(image) for image in images]
+    reference = prepared[reference_index]
+    reference_luminance = _registration_luminance(reference)
+    aligned: list[FloatImage] = []
+    records: list[RegistrationRecord] = []
+    for index, image in enumerate(prepared):
+        if image.shape != reference.shape:
+            error = f"shape {image.shape} does not match reference {reference.shape}"
+            if on_error == "raise":
+                raise ValueError(error)
+            records.append(RegistrationRecord(index=index, accepted=False, error=error))
+            continue
+        if index == reference_index:
+            aligned.append(image.copy())
+            records.append(
+                RegistrationRecord(
+                    index=index, accepted=True, rotation_degrees=0.0, translation=(0.0, 0.0)
+                )
+            )
+            continue
+        try:
+            transform = estimate_transform(
+                _registration_luminance(image), reference_luminance, config
+            )
+            registered, _ = apply_transform_rgb(
+                image, reference, transform, fill_value=config.fill_value
+            )
+        except Exception as error:
+            if on_error == "raise":
+                raise
+            records.append(RegistrationRecord(index=index, accepted=False, error=str(error)))
+            continue
+        aligned.append(registered)
+        records.append(
+            RegistrationRecord(
+                index=index,
+                accepted=True,
+                rotation_degrees=float(np.degrees(transform.rotation)),
+                translation=tuple(float(value) for value in transform.translation),
             )
         )
     return aligned, records

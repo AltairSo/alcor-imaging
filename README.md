@@ -8,12 +8,52 @@ The library contains no FTP client, Google Drive integration, downloader, direct
 crawler, credential handling, or notebook state. You decide where files come from
 and pass explicit paths or NumPy arrays.
 
-## Install in Colab
+## Install from the private repository in Colab
 
-Once this directory is pushed as its own GitHub repository:
+Create a fine-grained GitHub personal access token limited to the
+`AltairSo/alcor-imaging` repository with read-only **Contents** permission. Add it
+to the Colab notebook's Secrets panel as `GITHUB_TOKEN` and enable notebook access.
+Then run this cell. The token is supplied to Git through process-local environment
+configuration; it is not embedded in the repository URL or printed in notebook output.
 
 ```python
-!pip install -q "alcor-imaging[notebook] @ git+https://github.com/iam-abbas/alcor-imaging.git"
+import base64
+import os
+import subprocess
+import sys
+
+from google.colab import userdata
+
+token = userdata.get("GITHUB_TOKEN")
+if not token:
+    raise RuntimeError("Add GITHUB_TOKEN to Colab Secrets and enable notebook access.")
+
+basic_auth = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+git_env = os.environ.copy()
+git_env.update(
+    {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.extraHeader",
+        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic_auth}",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+)
+
+subprocess.run(
+    [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "-q",
+        "alcor-imaging[notebook] @ "
+        "git+https://github.com/AltairSo/alcor-imaging.git",
+    ],
+    check=True,
+    env=git_env,
+)
+
+del token, basic_auth, git_env
 ```
 
 For local development:
@@ -22,6 +62,51 @@ For local development:
 python -m pip install -e ".[dev,notebook]"
 pytest
 ```
+
+## One-shot-color / Bayer workflow
+
+Do not send raw Bayer FITS frames through the mono workflow: that produces a
+grayscale mosaic stack. `process_osc` calibrates raw CFA data before demosaicing,
+registers all three channels with one transform, integrates them, and applies a
+linked color-preserving stretch.
+
+```python
+import alcor_imaging as ai
+
+sample = ai.read_fits(light_paths[0])
+print("Bayer pattern:", ai.infer_bayer_pattern(sample.header))
+
+result = ai.process_osc(
+    light_paths,
+    config=ai.OSCConfig(
+        registration=ai.RegistrationConfig(downsample=2),
+        stacking=ai.StackConfig(
+            method="sigma_clip_median",
+            normalization="multiplicative",
+        ),
+        stretch=ai.StretchConfig(
+            black_percentile=0.2,
+            white_percentile=99.995,
+            asinh_strength=12.0,
+            shadow_protection=0.006,
+            gamma=0.95,
+        ),
+        background_box_size=None,  # Preserve large extended nebulosity such as M42.
+        white_balance=(1.25, 1.0, 1.15),
+        saturation=1.15,
+        highlight_knee=0.78,
+    ),
+)
+
+ai.write_fits("linear_RGB.fits", result.linear_rgb, overwrite=True, rgb_axis=-1)
+ai.write_tiff("display_16bit.tif", result.rgb, bits=16)
+ai.write_png("preview.png", result.rgb)
+```
+
+The Bayer pattern is read from `BAYERPAT`, `BAYERPATN`, `COLORTYP`, or `CFA`.
+If none is present, confirm the camera pattern and set `bayer_pattern` explicitly.
+Never guess it: a wrong pattern produces incorrect color and interpolation artifacts.
+The complete Colab example is in `examples/colab_osc_m42.py`.
 
 ## Quick HOO workflow
 
@@ -141,6 +226,7 @@ best added as explicit specialized modules once required by a dataset.
 src/alcor_imaging/
   fits.py          single-file FITS read/write
   calibration.py  bias, dark, flat calibration
+  demosaic.py     Bayer detection and Malvar/bilinear demosaicing
   quality.py      frame statistics and reference-selection metrics
   registration.py star-based similarity registration
   stacking.py     robust frame integration

@@ -8,25 +8,35 @@ import numpy as np
 from ._validation import FloatImage, as_float_image
 from .background import subtract_background
 from .calibration import calibrate
-from .color import adjust_saturation, apply_palette
+from .color import adjust_saturation, apply_palette, channel_balance
+from .demosaic import demosaic, infer_bayer_pattern, normalize_bayer_pattern
 from .enhance import wavelet_denoise
 from .fits import read_fits
-from .geometry import crop_to_overlap
+from .geometry import crop_to_overlap, overlap_bounds
 from .models import (
     CalibrationSet,
+    Frame,
     ImageSource,
     NarrowbandConfig,
     NarrowbandResult,
+    OSCConfig,
+    OSCResult,
 )
-from .registration import register_image
-from .stacking import register_and_stack
-from .stretch import stretch
+from .registration import register_image, register_rgb_many
+from .stacking import register_and_stack, stack_rgb
+from .stretch import stretch, stretch_rgb
 
 
 def _load_source(source: ImageSource) -> FloatImage:
     if isinstance(source, (str, PathLike)):
         return read_fits(source).data
     return as_float_image(source)
+
+
+def _load_frame(source: ImageSource) -> Frame:
+    if isinstance(source, (str, PathLike)):
+        return read_fits(source)
+    return Frame(data=as_float_image(source), header={})
 
 
 def process_narrowband(
@@ -127,4 +137,103 @@ def process_narrowband(
         masters=tuple(masters),
         rgb=rgb,
         stacks=tuple(stacks),
+    )
+
+
+def process_osc(
+    sources: Sequence[ImageSource],
+    *,
+    config: OSCConfig | None = None,
+    calibration: CalibrationSet | None = None,
+    exposures: Sequence[float] | None = None,
+) -> OSCResult:
+    """Process explicit one-shot-color Bayer FITS frames into linear and display RGB.
+
+    Detector calibration occurs on the untouched CFA data before demosaicing.
+    Registration is estimated from luminance and then applied identically to RGB channels.
+    """
+    config = config or OSCConfig()
+    if not sources:
+        raise ValueError("At least one OSC light frame is required.")
+    if exposures is not None and len(exposures) != len(sources):
+        raise ValueError("exposures must contain one value per light frame.")
+    frames = [_load_frame(source) for source in sources]
+
+    detected_patterns = {
+        pattern
+        for frame in frames
+        if (pattern := infer_bayer_pattern(frame.header)) is not None
+    }
+    if config.bayer_pattern is not None:
+        pattern = normalize_bayer_pattern(config.bayer_pattern)
+    elif len(detected_patterns) == 1:
+        pattern = detected_patterns.pop()
+    elif len(detected_patterns) > 1:
+        raise ValueError(f"Input FITS files disagree on Bayer pattern: {detected_patterns}.")
+    else:
+        raise ValueError(
+            "No Bayer pattern was found in FITS headers. Set OSCConfig(bayer_pattern='RGGB') "
+            "only after confirming the camera's actual CFA pattern."
+        )
+
+    rgb_frames: list[FloatImage] = []
+    for index, frame in enumerate(frames):
+        raw = frame.data
+        if calibration is not None:
+            raw = calibrate(
+                raw,
+                calibration,
+                exposure=None if exposures is None else exposures[index],
+            )
+        rgb_frames.append(demosaic(raw, pattern, method=config.demosaic_method))
+
+    aligned, records = register_rgb_many(
+        rgb_frames,
+        reference_index=config.reference_index,
+        config=config.registration,
+        on_error="reject",
+    )
+    accepted = [record.index for record in records if record.accepted]
+    rejected = [record.index for record in records if not record.accepted]
+    minimum = 1 if len(rgb_frames) == 1 else 2
+    if len(aligned) < minimum:
+        rejection_details = [
+            (record.index, record.error) for record in records if not record.accepted
+        ]
+        raise RuntimeError(
+            f"Only {len(aligned)} OSC frames registered; at least {minimum} are required. "
+            f"Rejections: {rejection_details}"
+        )
+
+    if config.crop_to_overlap:
+        row_slice, col_slice = overlap_bounds([image[..., 0] for image in aligned])
+        aligned = [image[row_slice, col_slice].copy() for image in aligned]
+    master = stack_rgb(aligned, config.stacking)
+
+    linear_channels = []
+    for channel in range(3):
+        channel_data = master[..., channel]
+        if config.background_box_size is not None:
+            channel_data = subtract_background(
+                channel_data, box_size=config.background_box_size
+            )
+        linear_channels.append(channel_data)
+    linear_rgb = np.stack(linear_channels, axis=-1).astype(np.float32)
+    linear_rgb = channel_balance(linear_rgb, config.white_balance, clip=False)
+
+    display_rgb = stretch_rgb(
+        linear_rgb,
+        config.stretch,
+        highlight_knee=config.highlight_knee,
+    )
+    if config.denoise_strength:
+        display_rgb = wavelet_denoise(display_rgb, strength=config.denoise_strength)
+    display_rgb = adjust_saturation(display_rgb, config.saturation)
+    return OSCResult(
+        linear_rgb=linear_rgb,
+        rgb=display_rgb,
+        accepted_indices=accepted,
+        rejected_indices=rejected,
+        registrations=records,
+        bayer_pattern=pattern,
     )

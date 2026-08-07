@@ -115,6 +115,30 @@ def stack(
     return result
 
 
+def stack_rgb(
+    images: Sequence[ArrayLike],
+    config: StackConfig | None = None,
+    *,
+    weights: Sequence[float] | None = None,
+) -> FloatImage:
+    """Stack registered RGB frames independently without changing their geometry."""
+    if not images:
+        raise ValueError("At least one RGB image is required.")
+    prepared = [np.asarray(image, dtype=np.float32) for image in images]
+    shape = prepared[0].shape
+    if len(shape) != 3 or shape[-1] != 3:
+        raise ValueError("RGB frames must have shape (height, width, 3).")
+    if any(image.shape != shape for image in prepared[1:]):
+        raise ValueError("All RGB frames must have the same shape.")
+    return np.stack(
+        [
+            stack([image[..., channel] for image in prepared], config, weights=weights)
+            for channel in range(3)
+        ],
+        axis=-1,
+    ).astype(np.float32)
+
+
 def register_and_stack(
     images: Sequence[ArrayLike],
     *,

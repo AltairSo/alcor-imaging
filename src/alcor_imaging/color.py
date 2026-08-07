@@ -73,8 +73,16 @@ def apply_luminance(
     return np.clip(data * ratio[..., None], 0.0, 1.0).astype(np.float32)
 
 
-def channel_balance(rgb: ArrayLike, gains: tuple[float, float, float]) -> FloatImage:
+def channel_balance(
+    rgb: ArrayLike,
+    gains: tuple[float, float, float],
+    *,
+    clip: bool = True,
+) -> FloatImage:
     data = as_float_image(rgb, ndim=3)
     if any(gain < 0 for gain in gains):
         raise ValueError("Channel gains cannot be negative.")
-    return np.clip(data * np.asarray(gains, dtype=np.float32), 0.0, 1.0).astype(np.float32)
+    result = data * np.asarray(gains, dtype=np.float32)
+    if clip:
+        result = np.clip(result, 0.0, 1.0)
+    return result.astype(np.float32)

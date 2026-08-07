@@ -91,3 +91,63 @@ def stretch(image: ArrayLike, config: StretchConfig | None = None) -> FloatImage
     if config.gamma != 1.0:
         result = np.power(result, config.gamma).astype(np.float32)
     return np.clip(result, 0.0, 1.0)
+
+
+def soft_clip(image: ArrayLike, *, knee: float = 0.85) -> FloatImage:
+    """Compress values above a knee smoothly toward one instead of hard clipping."""
+    if not 0 < knee < 1:
+        raise ValueError("knee must lie strictly between 0 and 1.")
+    data = np.clip(as_float_image(image, ndim=None), 0.0, None)
+    excess = np.maximum(data - knee, 0.0)
+    compressed = knee + (1.0 - knee) * (
+        1.0 - np.exp(-excess / max(1.0 - knee, 1e-12))
+    )
+    return np.where(data <= knee, data, compressed).astype(np.float32)
+
+
+def stretch_rgb(
+    rgb: ArrayLike,
+    config: StretchConfig | None = None,
+    *,
+    highlight_knee: float = 0.85,
+) -> FloatImage:
+    """Apply a linked luminance stretch that preserves RGB channel ratios."""
+    config = config or StretchConfig()
+    data = as_float_image(rgb, ndim=3)
+    if data.shape[-1] != 3:
+        raise ValueError("RGB input must have three channels on the last axis.")
+    validate_percentile(config.black_percentile, "black_percentile")
+    validate_percentile(config.white_percentile, "white_percentile")
+    if config.black_percentile >= config.white_percentile:
+        raise ValueError("black_percentile must be below white_percentile.")
+    luminance = np.einsum("...c,c->...", data, (0.2126, 0.7152, 0.0722))
+    finite = luminance[np.isfinite(luminance)]
+    if finite.size == 0:
+        raise ValueError("RGB image contains no finite pixels.")
+    black = float(np.percentile(finite, config.black_percentile))
+    shifted = np.clip(data - black, 0.0, None)
+    shifted_luminance = np.einsum(
+        "...c,c->...", shifted, (0.2126, 0.7152, 0.0722)
+    )
+    white = float(
+        np.percentile(
+            shifted_luminance[np.isfinite(shifted_luminance)], config.white_percentile
+        )
+    )
+    normalized = shifted / max(white, 1e-12)
+    light = np.einsum("...c,c->...", normalized, (0.2126, 0.7152, 0.0722))
+    target = np.arcsinh(config.asinh_strength * light) / np.arcsinh(config.asinh_strength)
+    protection = np.divide(
+        light,
+        light + config.shadow_protection,
+        out=np.ones_like(light),
+        where=(light + config.shadow_protection) != 0,
+    )
+    target = protection * target + (1.0 - protection) * light
+    ratio = np.divide(target, light, out=np.zeros_like(light), where=light > 1e-12)
+    result = normalized * ratio[..., None]
+    if config.gamma <= 0:
+        raise ValueError("gamma must be positive.")
+    if config.gamma != 1.0:
+        result = np.power(np.clip(result, 0.0, None), config.gamma)
+    return soft_clip(result, knee=highlight_knee)
