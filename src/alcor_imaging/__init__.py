@@ -2,6 +2,7 @@
 
 from .background import estimate_background, repair_nonfinite, subtract_background
 from .calibration import calibrate, calibrate_many, make_master
+from .channels import align_mono_masters, integrate_mono_channel
 from .color import (
     PALETTES,
     adjust_saturation,
@@ -26,9 +27,11 @@ from .geometry import crop_to_overlap, overlap_bounds
 from .hdr import hdr_combine, hdr_combine_with_mask
 from .models import (
     CalibrationSet,
+    ChannelIntegrationResult,
     Frame,
     LRGBConfig,
     LRGBResult,
+    MasterAlignmentResult,
     NarrowbandConfig,
     NarrowbandResult,
     OSCConfig,
@@ -64,10 +67,12 @@ __all__ = [
     "PALETTES",
     "VALID_BAYER_PATTERNS",
     "CalibrationSet",
+    "ChannelIntegrationResult",
     "Frame",
     "FrameQuality",
     "LRGBConfig",
     "LRGBResult",
+    "MasterAlignmentResult",
     "NarrowbandConfig",
     "NarrowbandResult",
     "OSCConfig",
@@ -78,6 +83,7 @@ __all__ = [
     "StackResult",
     "StretchConfig",
     "adjust_saturation",
+    "align_mono_masters",
     "apply_luminance",
     "apply_palette",
     "apply_transform",
@@ -94,6 +100,7 @@ __all__ = [
     "hdr_combine",
     "hdr_combine_with_mask",
     "infer_bayer_pattern",
+    "integrate_mono_channel",
     "local_contrast",
     "luminance",
     "make_master",

@@ -1,59 +1,18 @@
 # Alcor Imaging
 
 Research-grade, array-first astronomical image processing for telescope data.
-Alcor Imaging turns FITS/FIT/FTS frames into calibrated masters and high-resolution
-mono or narrowband RGB output without owning your storage workflow.
+Alcor Imaging turns FITS/FIT/FTS frames into calibrated mono, broadband,
+narrowband, or arbitrary multispectral products without owning your storage workflow.
 
 The library contains no FTP client, Google Drive integration, downloader, directory
 crawler, credential handling, or notebook state. You decide where files come from
 and pass explicit paths or NumPy arrays.
 
-## Install from the private repository in Colab
-
-Create a fine-grained GitHub personal access token limited to the
-`AltairSo/alcor-imaging` repository with read-only **Contents** permission. Add it
-to the Colab notebook's Secrets panel as `GITHUB_TOKEN` and enable notebook access.
-Then run this cell. The token is supplied to Git through process-local environment
-configuration; it is not embedded in the repository URL or printed in notebook output.
+## Install in Colab
 
 ```python
-import base64
-import os
-import subprocess
-import sys
-
-from google.colab import userdata
-
-token = userdata.get("GITHUB_TOKEN")
-if not token:
-    raise RuntimeError("Add GITHUB_TOKEN to Colab Secrets and enable notebook access.")
-
-basic_auth = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-git_env = os.environ.copy()
-git_env.update(
-    {
-        "GIT_CONFIG_COUNT": "1",
-        "GIT_CONFIG_KEY_0": "http.extraHeader",
-        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic_auth}",
-        "GIT_TERMINAL_PROMPT": "0",
-    }
-)
-
-subprocess.run(
-    [
-        sys.executable,
-        "-m",
-        "pip",
-        "install",
-        "-q",
-        "alcor-imaging[notebook] @ "
-        "git+https://github.com/AltairSo/alcor-imaging.git",
-    ],
-    check=True,
-    env=git_env,
-)
-
-del token, basic_auth, git_env
+%pip install -q \
+  "alcor-imaging[notebook] @ git+https://github.com/AltairSo/alcor-imaging.git@main"
 ```
 
 For local development:
@@ -63,13 +22,51 @@ python -m pip install -e ".[dev,notebook]"
 pytest
 ```
 
-When updating an existing Colab installation, reinstall only this package so pip
-does not unnecessarily replace Colab's preinstalled scientific stack:
+To update an existing Colab installation:
 
 ```python
-%pip install -q --upgrade --force-reinstall --no-deps --no-cache-dir \
+%pip install -q --upgrade --no-cache-dir \
   "alcor-imaging[notebook] @ git+https://github.com/AltairSo/alcor-imaging.git@main"
 ```
+
+Restart the Colab session after installation or upgrade.
+
+## Generic channel primitives
+
+The core has no built-in concept of Ha, OIII, LRGB, an object name, a telescope,
+or a directory layout. The caller supplies already-grouped sources and all metadata
+required by the chosen integration method.
+
+```python
+ha = ai.integrate_mono_channel(
+    ha_frames,
+    mode="stack",
+    registration=ai.RegistrationConfig(downsample=4),
+    stacking=ai.StackConfig(method="sigma_clip_median"),
+)
+
+oiii = ai.integrate_mono_channel(
+    oiii_frames,
+    mode="stack",
+    registration=ai.RegistrationConfig(downsample=4),
+    stacking=ai.StackConfig(method="sigma_clip_median"),
+)
+
+aligned = ai.align_mono_masters(
+    {"hydrogen": ha.master, "oxygen": oiii.master},
+    reference="hydrogen",
+)
+
+rgb = ai.combine_channels(
+    [aligned.masters["hydrogen"], aligned.masters["oxygen"]],
+    matrix=((1.0, 0.0), (0.22, 0.78), (0.0, 1.0)),
+)
+```
+
+For mixed-exposure inputs, select `mode="hdr"` and explicitly supply `exposures`,
+`weights`, and `saturation_levels`. Convenience APIs such as `process_narrowband`,
+`process_lrgb`, and `process_osc` compose these lower-level operations but do not
+replace them.
 
 ## Mixed-exposure LRGB workflow
 
@@ -222,7 +219,7 @@ linear = ai.subtract_background(master, background)
 display = ai.stretch(linear, ai.StretchConfig(asinh_strength=7.0))
 ```
 
-Custom palettes are ordinary 3×N matrices, so any filter set can be mapped without
+Custom palettes are ordinary 3-by-N matrices, so any filter set can be mapped without
 changing library code:
 
 ```python
@@ -261,6 +258,7 @@ best added as explicit specialized modules once required by a dataset.
 src/alcor_imaging/
   fits.py          single-file FITS read/write
   calibration.py  bias, dark, flat calibration
+  channels.py     generic mono integration and arbitrary master alignment
   demosaic.py     Bayer detection and Malvar/bilinear demosaicing
   quality.py      frame statistics and reference-selection metrics
   registration.py star-based similarity registration

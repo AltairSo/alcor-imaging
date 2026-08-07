@@ -10,12 +10,18 @@ from scipy.ndimage import gaussian_filter
 from ._validation import FloatImage, as_float_image
 from .background import subtract_background
 from .calibration import calibrate
-from .color import adjust_saturation, apply_luminance, apply_palette, channel_balance
+from .channels import align_mono_masters, integrate_mono_channel
+from .color import (
+    adjust_saturation,
+    apply_luminance,
+    apply_palette,
+    channel_balance,
+    combine_channels,
+)
 from .demosaic import demosaic, infer_bayer_pattern, normalize_bayer_pattern
 from .enhance import wavelet_denoise
 from .fits import read_fits
-from .geometry import crop_to_overlap, overlap_bounds
-from .hdr import hdr_combine, hdr_combine_with_mask
+from .geometry import overlap_bounds
 from .models import (
     CalibrationSet,
     Frame,
@@ -27,18 +33,13 @@ from .models import (
     OSCConfig,
     OSCResult,
     RegistrationRecord,
+    StackResult,
 )
-from .registration import register_image, register_many, register_rgb_many
-from .stacking import register_and_stack, stack_rgb
+from .registration import register_image, register_rgb_many
+from .stacking import stack_rgb
 from .stretch import stretch, stretch_rgb
 
 T = TypeVar("T")
-
-
-def _load_source(source: ImageSource) -> FloatImage:
-    if isinstance(source, (str, PathLike)):
-        return read_fits(source).data
-    return as_float_image(source)
 
 
 def _load_frame(source: ImageSource) -> Frame:
@@ -53,21 +54,18 @@ def process_narrowband(
     config: NarrowbandConfig | None = None,
     calibrations: Sequence[CalibrationSet | None] | None = None,
     exposures: Sequence[Sequence[float] | None] | None = None,
+    weights: Sequence[Sequence[float] | None] | None = None,
     reference_indices: Sequence[int] | None = None,
 ) -> NarrowbandResult:
     """Run a reproducible narrowband workflow over explicit frame sequences.
 
-    HOO expects channels ``(Ha, OIII)``. SHO expects ``(SII, Ha, OIII)``.
-    Inputs may be arrays or individual FITS paths; discovery and file management
-    remain the caller's responsibility.
+    Channel order is caller-defined and must match the selected palette or the columns
+    of ``mixing_matrix``. Inputs may be arrays or individual FITS paths; discovery,
+    grouping, filter identification, and file management remain the caller's responsibility.
     """
     config = config or NarrowbandConfig()
-    palette = config.palette.upper()
-    if palette not in {"HOO", "SHO"}:
-        raise ValueError("palette must be 'HOO' or 'SHO'.")
-    required_channels = 2 if palette == "HOO" else 3
-    if len(channels) != required_channels:
-        raise ValueError(f"{palette} requires {required_channels} channel sequences.")
+    if not channels:
+        raise ValueError("At least one channel is required.")
     if any(not channel for channel in channels):
         raise ValueError("Every channel must contain at least one light frame.")
     if calibrations is None:
@@ -78,45 +76,43 @@ def process_narrowband(
         exposures = [None] * len(channels)
     if len(exposures) != len(channels):
         raise ValueError("exposures must contain one sequence per channel.")
+    if weights is None:
+        weights = [None] * len(channels)
+    if len(weights) != len(channels):
+        raise ValueError("weights must contain one sequence per channel.")
     if reference_indices is None:
         reference_indices = [0] * len(channels)
     if len(reference_indices) != len(channels):
         raise ValueError("reference_indices must contain one index per channel.")
 
-    stacks = []
+    integrations = []
     for channel_index, sources in enumerate(channels):
-        images = [_load_source(source) for source in sources]
         channel_exposures = exposures[channel_index]
-        if channel_exposures is not None and len(channel_exposures) != len(images):
-            raise ValueError(f"Exposure count does not match channel {channel_index} frame count.")
-        calibration = calibrations[channel_index]
-        if calibration is not None:
-            images = [
-                calibrate(
-                    image,
-                    calibration,
-                    exposure=None if channel_exposures is None else channel_exposures[index],
-                )
-                for index, image in enumerate(images)
-            ]
-        stacks.append(
-            register_and_stack(
-                images,
+        integrations.append(
+            integrate_mono_channel(
+                sources,
+                mode="stack",
                 reference_index=reference_indices[channel_index],
                 registration=config.registration,
                 stacking=config.stacking,
-                minimum_accepted=1 if len(images) == 1 else 2,
+                calibration=calibrations[channel_index],
+                exposures=channel_exposures,
+                weights=weights[channel_index],
             )
         )
 
-    masters = [stacks[0].image]
-    for channel_stack in stacks[1:]:
-        aligned, _, _ = register_image(
-            channel_stack.image, stacks[0].image, config.registration
-        )
-        masters.append(aligned)
-    if config.crop_to_overlap:
-        masters = crop_to_overlap(masters, repair_holes=True)
+    master_names = [str(index) for index in range(len(integrations))]
+    aligned_result = align_mono_masters(
+        {
+            name: integration.master
+            for name, integration in zip(master_names, integrations, strict=True)
+        },
+        reference=master_names[0],
+        registration=config.registration,
+        crop=config.crop_to_overlap,
+        repair_holes=True,
+    )
+    masters = list(aligned_result.masters.values())
 
     linear_channels: list[FloatImage] = []
     for master in masters:
@@ -138,13 +134,25 @@ def process_narrowband(
             np.clip(channel * boost, 0.0, 1.0).astype(np.float32)
             for channel, boost in zip(display_channels, config.channel_boosts, strict=True)
         ]
-    rgb = apply_palette(display_channels, palette)
+    if config.mixing_matrix is not None:
+        rgb = combine_channels(display_channels, config.mixing_matrix)
+    else:
+        rgb = apply_palette(display_channels, config.palette)
     rgb = adjust_saturation(rgb, config.saturation)
+    stacks = tuple(
+        StackResult(
+            image=integration.master,
+            accepted_indices=integration.accepted_indices,
+            rejected_indices=integration.rejected_indices,
+            registrations=integration.registrations,
+        )
+        for integration in integrations
+    )
     return NarrowbandResult(
         linear_channels=tuple(linear_channels),
         masters=tuple(masters),
         rgb=rgb,
-        stacks=tuple(stacks),
+        stacks=stacks,
     )
 
 
@@ -344,42 +352,26 @@ def process_lrgb(
         if len(channel_weights) != len(frames):
             raise ValueError(f"Channel {channel} needs one weight per image.")
         reference_index = int(np.argmax(channel_exposures))
-        aligned, records = register_many(
+        integration = integrate_mono_channel(
             [frame.data for frame in frames],
+            mode="hdr",
+            registration=config.registration,
             reference_index=reference_index,
-            config=config.registration,
-            on_error="reject",
-        )
-        accepted = [record.index for record in records if record.accepted]
-        rejected = [record.index for record in records if not record.accepted]
-        if not accepted:
-            raise RuntimeError(f"No {channel} images registered successfully.")
-        combine_kwargs = {
-            "weights": [channel_weights[index] for index in accepted],
-            "saturation_levels": [
-                config.saturation_level or _saturation_level(frames[index])
-                for index in accepted
+            exposures=channel_exposures,
+            weights=channel_weights,
+            saturation_levels=[
+                config.saturation_level or _saturation_level(frame) for frame in frames
             ],
-            "saturation_fraction": config.saturation_fraction,
-            "saturation_dilation": config.saturation_dilation,
-            "background_percentile": config.background_percentile,
-        }
-        accepted_exposures = [channel_exposures[index] for index in accepted]
+            saturation_fraction=config.saturation_fraction,
+            saturation_dilation=config.saturation_dilation,
+            background_percentile=config.background_percentile,
+        )
+        masters[channel] = integration.master
         if channel == "L":
-            masters[channel], luminance_unrecoverable = hdr_combine_with_mask(
-                aligned,
-                accepted_exposures,
-                **combine_kwargs,
-            )
-        else:
-            masters[channel] = hdr_combine(
-                aligned,
-                accepted_exposures,
-                **combine_kwargs,
-            )
-        registrations[channel] = records
-        accepted_indices[channel] = accepted
-        rejected_indices[channel] = rejected
+            luminance_unrecoverable = integration.unrecoverable_mask
+        registrations[channel] = integration.registrations
+        accepted_indices[channel] = integration.accepted_indices
+        rejected_indices[channel] = integration.rejected_indices
 
     aligned_masters = [masters["L"]]
     for channel in ("R", "G", "B"):
