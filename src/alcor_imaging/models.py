@@ -62,6 +62,30 @@ class StretchConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class RenderConfig:
+    """Configuration for color-preserving nonlinear RGB rendering.
+
+    Percentiles are measured from the supplied image. Channel gains are explicit
+    because filter response, atmosphere, and scientific/creative intent cannot be
+    inferred reliably from image pixels alone.
+    """
+
+    background_percentile: float | None = 20.0
+    background_offsets: tuple[float, float, float] | None = None
+    channel_gains: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    white_percentile: float = 99.9
+    faint_strength: float = 35.0
+    highlight_strength: float = 6.0
+    core_start: float = 0.08
+    core_end: float = 0.65
+    mask_blur_sigma: float = 2.0
+    shadow_knee: float = 0.0015
+    gamma: float = 0.88
+    saturation: float = 0.9
+    highlight_knee: float = 0.82
+
+
+@dataclass(frozen=True, slots=True)
 class NarrowbandConfig:
     registration: RegistrationConfig = field(default_factory=RegistrationConfig)
     stacking: StackConfig = field(default_factory=StackConfig)
@@ -129,9 +153,12 @@ class LRGBConfig:
     crop_to_overlap: bool = True
     white_balance: tuple[float, float, float] = (1.0, 1.0, 1.0)
     luminance_weight: float = 0.75
+    luminance_ratio_limits: tuple[float, float] = (0.65, 1.6)
+    luminance_highlight_range: tuple[float, float] = (0.55, 0.9)
     denoise_strength: float = 0.1
     saturation: float = 1.12
     highlight_knee: float = 0.78
+    render: RenderConfig | None = field(default_factory=RenderConfig)
 
 
 @dataclass(slots=True)

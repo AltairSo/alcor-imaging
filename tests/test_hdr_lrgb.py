@@ -74,3 +74,20 @@ def test_lrgb_pipeline_builds_color_and_injects_luminance() -> None:
     assert not np.allclose(result.rgb[..., 0], result.rgb[..., 2])
     assert set(result.accepted_indices) == {"L", "R", "G", "B"}
     assert result.luminance_unrecoverable_mask.shape == result.linear_luminance.shape
+
+
+def test_lrgb_rejects_invalid_luminance_highlight_range() -> None:
+    stars = _mono_star_field()
+    channels = {channel: (stars + 100,) for channel in "LRGB"}
+    exposures = {channel: (60.0,) for channel in channels}
+    with np.testing.assert_raises_regex(ValueError, "luminance_highlight_range"):
+        process_lrgb(
+            channels,
+            exposures=exposures,
+            config=LRGBConfig(
+                registration=RegistrationConfig(downsample=1, min_area=3),
+                saturation_level=65535,
+                denoise_strength=0,
+                luminance_highlight_range=(0.9, 0.5),
+            ),
+        )

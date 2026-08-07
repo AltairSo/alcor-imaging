@@ -61,11 +61,26 @@ result = ai.process_lrgb(
             detection_sigma=3.0,
             min_area=5,
         ),
-        white_balance=(1.04, 1.0, 1.08),
-        luminance_weight=0.72,
+        # Explicit calibration for this filter/camera/data set. These values are
+        # deliberately notebook inputs rather than guesses inside the library.
+        white_balance=(0.58, 1.0, 1.35),
+        render=ai.RenderConfig(
+            background_percentile=20.0,
+            white_percentile=99.9,
+            faint_strength=35.0,
+            highlight_strength=6.0,
+            core_start=0.08,
+            core_end=0.65,
+            shadow_knee=0.0015,
+            gamma=0.88,
+            saturation=0.90,
+            highlight_knee=0.82,
+        ),
+        luminance_weight=0.60,
+        luminance_ratio_limits=(0.7, 1.45),
+        luminance_highlight_range=(0.5, 0.82),
         denoise_strength=0.08,
-        saturation=1.10,
-        highlight_knee=0.74,
+        saturation=1.0,
     ),
 )
 

@@ -33,9 +33,11 @@ from .models import (
     OSCConfig,
     OSCResult,
     RegistrationRecord,
+    RenderConfig,
     StackResult,
 )
 from .registration import register_image, register_rgb_many
+from .render import render_rgb
 from .stacking import stack_rgb
 from .stretch import stretch, stretch_rgb
 
@@ -402,35 +404,70 @@ def process_lrgb(
     linear_rgb = np.stack((red, green, blue), axis=-1).astype(np.float32)
     linear_rgb = channel_balance(linear_rgb, config.white_balance, clip=False)
 
-    display_rgb = stretch_rgb(
-        linear_rgb, config.rgb_stretch, highlight_knee=config.highlight_knee
-    )
+    if config.render is None:
+        display_rgb = stretch_rgb(
+            linear_rgb, config.rgb_stretch, highlight_knee=config.highlight_knee
+        )
+    else:
+        display_rgb = render_rgb(linear_rgb, config.render)
     if config.denoise_strength:
         display_rgb = wavelet_denoise(display_rgb, strength=config.denoise_strength)
     luminance_rgb = np.repeat(linear_luminance[..., None], 3, axis=-1)
-    display_luminance = stretch_rgb(
-        luminance_rgb,
-        config.luminance_stretch,
-        highlight_knee=config.highlight_knee,
-    )[..., 0]
+    if config.render is None:
+        display_luminance = stretch_rgb(
+            luminance_rgb,
+            config.luminance_stretch,
+            highlight_knee=config.highlight_knee,
+        )[..., 0]
+    else:
+        luminance_render = RenderConfig(
+            background_percentile=config.render.background_percentile,
+            white_percentile=config.render.white_percentile,
+            faint_strength=config.render.faint_strength,
+            highlight_strength=config.render.highlight_strength,
+            core_start=config.render.core_start,
+            core_end=config.render.core_end,
+            mask_blur_sigma=config.render.mask_blur_sigma,
+            shadow_knee=config.render.shadow_knee,
+            gamma=config.render.gamma,
+            saturation=1.0,
+            highlight_knee=config.render.highlight_knee,
+        )
+        display_luminance = render_rgb(luminance_rgb, luminance_render)[..., 0]
     if not 0 <= config.luminance_weight <= 1:
         raise ValueError("luminance_weight must lie between 0 and 1.")
     rgb_luminance = np.einsum(
         "...c,c->...", display_rgb, (0.2126, 0.7152, 0.0722)
     )
+    highlight_start, highlight_end = config.luminance_highlight_range
+    if not 0 <= highlight_start < highlight_end <= 1:
+        raise ValueError(
+            "luminance_highlight_range must increase from zero to at most one."
+        )
+    highlight_mask = np.clip(
+        (rgb_luminance - highlight_start) / (highlight_end - highlight_start),
+        0.0,
+        1.0,
+    )
+    highlight_mask = highlight_mask * highlight_mask * (3.0 - 2.0 * highlight_mask)
+    highlight_reliability = 1.0 - highlight_mask
     if luminance_unrecoverable is None:
         luminance_reliability = np.ones_like(display_luminance)
     else:
         luminance_reliability = 1.0 - gaussian_filter(
             luminance_unrecoverable.astype(np.float32), sigma=3.0
         )
-    effective_luminance_weight = config.luminance_weight * luminance_reliability
+    effective_luminance_weight = (
+        config.luminance_weight * luminance_reliability * highlight_reliability
+    )
     target_luminance = (
         effective_luminance_weight * display_luminance
         + (1.0 - effective_luminance_weight) * rgb_luminance
     )
     display_rgb = apply_luminance(
-        display_rgb, target_luminance, ratio_limits=(0.5, 2.5)
+        display_rgb,
+        target_luminance,
+        ratio_limits=config.luminance_ratio_limits,
     )
     display_rgb = adjust_saturation(display_rgb, config.saturation)
     if luminance_unrecoverable is None:

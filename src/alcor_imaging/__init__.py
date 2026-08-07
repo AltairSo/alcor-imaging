@@ -38,6 +38,7 @@ from .models import (
     OSCResult,
     RegistrationConfig,
     RegistrationRecord,
+    RenderConfig,
     StackConfig,
     StackResult,
     StretchConfig,
@@ -51,6 +52,12 @@ from .registration import (
     register_many,
     register_rgb_many,
     registration_stretch,
+)
+from .render import (
+    dual_asinh_stretch_rgb,
+    estimate_background_offsets,
+    neutralize_background,
+    render_rgb,
 )
 from .stacking import register_and_stack, stack, stack_rgb
 from .stretch import (
@@ -79,6 +86,7 @@ __all__ = [
     "OSCResult",
     "RegistrationConfig",
     "RegistrationRecord",
+    "RenderConfig",
     "StackConfig",
     "StackResult",
     "StretchConfig",
@@ -95,7 +103,9 @@ __all__ = [
     "combine_channels",
     "crop_to_overlap",
     "demosaic",
+    "dual_asinh_stretch_rgb",
     "estimate_background",
+    "estimate_background_offsets",
     "estimate_transform",
     "hdr_combine",
     "hdr_combine_with_mask",
@@ -108,6 +118,7 @@ __all__ = [
     "measure_frame",
     "midtone_transfer",
     "mosaic_rgb",
+    "neutralize_background",
     "normalize",
     "normalize_bayer_pattern",
     "overlap_bounds",
@@ -121,6 +132,7 @@ __all__ = [
     "register_many",
     "register_rgb_many",
     "registration_stretch",
+    "render_rgb",
     "repair_nonfinite",
     "soft_clip",
     "stack",
@@ -135,4 +147,4 @@ __all__ = [
     "write_tiff",
 ]
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"

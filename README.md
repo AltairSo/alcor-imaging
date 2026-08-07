@@ -85,15 +85,56 @@ result = ai.process_lrgb(
         "B": blue_integration_seconds,
     },
     config=ai.LRGBConfig(
-        white_balance=(1.04, 1.0, 1.08),
-        luminance_weight=0.72,
-        highlight_knee=0.74,
+        # These gains belong to this camera/filter/data set, not to "LRGB" itself.
+        white_balance=(0.58, 1.0, 1.35),
+        render=ai.RenderConfig(
+            background_percentile=20,
+            white_percentile=99.9,
+            faint_strength=35,
+            highlight_strength=6,
+            core_start=0.08,
+            core_end=0.65,
+            gamma=0.88,
+            saturation=0.9,
+        ),
+        luminance_weight=0.60,
+        luminance_highlight_range=(0.5, 0.82),
     ),
 )
 ```
 
 The complete 653-minute M42 example, including its subframe-count weighting table,
 is in `examples/colab_lrgb_m42.py`.
+
+## Linear data and display rendering
+
+Integration and rendering are separate operations. Preserve the linear FITS master
+for measurement and future processing; use `render_rgb` only to produce a display
+image. Its linked dual-asinh curve stretches faint signal strongly while changing to
+a gentler curve around bright cores and stars.
+
+```python
+display = ai.render_rgb(
+    linear_rgb,
+    ai.RenderConfig(
+        background_percentile=20,       # or supply background_offsets explicitly
+        channel_gains=(0.8, 1.0, 1.2),  # caller-controlled color calibration
+        white_percentile=99.9,
+        faint_strength=35,
+        highlight_strength=6,
+        core_start=0.08,
+        core_end=0.65,
+        shadow_knee=0.0015,
+        gamma=0.88,
+        saturation=0.9,
+        highlight_knee=0.82,
+    ),
+)
+```
+
+For complete control, call `estimate_background_offsets`, `neutralize_background`,
+and `dual_asinh_stretch_rgb` separately. No object detection, target-specific preset,
+or hidden color calibration is performed.
 
 ## One-shot-color / Bayer workflow
 
