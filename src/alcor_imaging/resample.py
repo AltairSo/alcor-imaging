@@ -319,18 +319,20 @@ def compose_mosaic(
                 denominator += blend
             valid_output = denominator > 1e-12
             if ndim == 3:
-                tile = xp.divide(
-                    accumulator,
-                    denominator[..., None],
-                    out=xp.full_like(accumulator, fill_value),
-                    where=valid_output[..., None],
+                safe_denominator = xp.where(valid_output, denominator, 1.0)
+                tile = accumulator / safe_denominator[..., None]
+                tile = xp.where(
+                    valid_output[..., None],
+                    tile,
+                    xp.asarray(fill_value, dtype=xp.float32),
                 )
             else:
-                tile = xp.divide(
-                    accumulator,
-                    denominator,
-                    out=xp.full_like(accumulator, fill_value),
-                    where=valid_output,
+                safe_denominator = xp.where(valid_output, denominator, 1.0)
+                tile = accumulator / safe_denominator
+                tile = xp.where(
+                    valid_output,
+                    tile,
+                    xp.asarray(fill_value, dtype=xp.float32),
                 )
             result[y0:y1, x0:x1] = np.asarray(to_host(tile), dtype=np.float32)
             if coverage is not None:

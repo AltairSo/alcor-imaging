@@ -106,11 +106,12 @@ def _combine_cube_gpu(
         device_weights = cp.asarray(weights, dtype=cp.float32)[:, None, None]
         weighted = cp.where(valid, data, 0.0) * device_weights
         denominator = cp.sum(valid * device_weights, axis=0)
-        result = cp.divide(
-            cp.sum(weighted, axis=0),
-            denominator,
-            out=cp.full(cube.shape[1:], cp.nan, dtype=cp.float32),
-            where=denominator > 0,
+        valid_denominator = denominator > 0
+        safe_denominator = cp.where(valid_denominator, denominator, 1.0)
+        result = cp.where(
+            valid_denominator,
+            cp.sum(weighted, axis=0) / safe_denominator,
+            cp.nan,
         )
     else:
         raise ValueError(f"Unknown stack method {config.method!r}.")

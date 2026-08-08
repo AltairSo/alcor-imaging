@@ -119,11 +119,17 @@ def _dual_asinh_device(
         target *= shadow_mask
     if gamma != 1.0:
         target = xp.power(xp.clip(target, 0.0, None), gamma)
-    ratio = xp.divide(target, light, out=xp.zeros_like(light), where=light > 1e-12)
+    positive_light = light > 1e-12
+    ratio = xp.where(positive_light, target / xp.maximum(light, 1e-12), 0.0)
     result = normalized * ratio[..., None]
     peak = xp.max(result, axis=-1)
     compressed_peak = _soft_clip_device(peak, highlight_knee, xp)
-    compression = xp.divide(compressed_peak, peak, out=xp.zeros_like(peak), where=peak > 1e-12)
+    positive_peak = peak > 1e-12
+    compression = xp.where(
+        positive_peak,
+        compressed_peak / xp.maximum(peak, 1e-12),
+        0.0,
+    )
     return xp.clip(result * compression[..., None], 0.0, 1.0).astype(xp.float32)
 
 
