@@ -432,6 +432,8 @@ def process_lrgb(
             gamma=config.render.gamma,
             saturation=1.0,
             highlight_knee=config.render.highlight_knee,
+            backend=config.render.backend,
+            tile_size=config.render.tile_size,
         )
         display_luminance = render_rgb(luminance_rgb, luminance_render)[..., 0]
     if not 0 <= config.luminance_weight <= 1:

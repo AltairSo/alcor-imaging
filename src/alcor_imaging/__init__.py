@@ -1,5 +1,12 @@
 """Alcor Imaging: array-first astronomical image processing."""
 
+from .backend import (
+    BackendInfo,
+    GPUUnavailableError,
+    backend_info,
+    clear_gpu_cache,
+    gpu_available,
+)
 from .background import estimate_background, repair_nonfinite, subtract_background
 from .calibration import calibrate, calibrate_many, make_master
 from .channels import align_mono_masters, integrate_mono_channel
@@ -59,6 +66,7 @@ from .render import (
     neutralize_background,
     render_rgb,
 )
+from .resample import compose_mosaic, warp_affine
 from .stacking import register_and_stack, stack, stack_rgb
 from .stretch import (
     asinh_stretch,
@@ -73,10 +81,12 @@ from .stretch import (
 __all__ = [
     "PALETTES",
     "VALID_BAYER_PATTERNS",
+    "BackendInfo",
     "CalibrationSet",
     "ChannelIntegrationResult",
     "Frame",
     "FrameQuality",
+    "GPUUnavailableError",
     "LRGBConfig",
     "LRGBResult",
     "MasterAlignmentResult",
@@ -96,17 +106,21 @@ __all__ = [
     "apply_palette",
     "apply_transform",
     "asinh_stretch",
+    "backend_info",
     "bayer_masks",
     "calibrate",
     "calibrate_many",
     "channel_balance",
+    "clear_gpu_cache",
     "combine_channels",
+    "compose_mosaic",
     "crop_to_overlap",
     "demosaic",
     "dual_asinh_stretch_rgb",
     "estimate_background",
     "estimate_background_offsets",
     "estimate_transform",
+    "gpu_available",
     "hdr_combine",
     "hdr_combine_with_mask",
     "infer_bayer_pattern",
@@ -141,10 +155,11 @@ __all__ = [
     "stretch_rgb",
     "subtract_background",
     "unsharp_mask",
+    "warp_affine",
     "wavelet_denoise",
     "write_fits",
     "write_png",
     "write_tiff",
 ]
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"

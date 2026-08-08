@@ -8,7 +8,9 @@ from numpy.typing import ArrayLike
 from skimage.transform import SimilarityTransform
 
 from ._validation import FloatImage, as_float_image, finite_values
+from .backend import Backend, resolve_backend
 from .models import RegistrationConfig, RegistrationRecord
+from .resample import warp_affine
 
 
 def _as_rgb_image(image: ArrayLike) -> FloatImage:
@@ -76,10 +78,20 @@ def apply_transform(
     transform: SimilarityTransform,
     *,
     fill_value: float = np.nan,
+    backend: Backend = "cpu",
 ) -> tuple[FloatImage, np.ndarray]:
     """Warp source onto reference and return the image plus invalid-pixel footprint."""
     source_data = as_float_image(source)
     reference_data = as_float_image(reference)
+    if resolve_backend(backend) == "gpu":
+        return warp_affine(
+            source_data,
+            transform.params,
+            reference_data.shape,
+            backend="gpu",
+            fill_value=fill_value,
+            return_footprint=True,
+        )
     aligned, footprint = astroalign.apply_transform(
         transform,
         source_data,
@@ -101,7 +113,11 @@ def register_image(
     config = config or RegistrationConfig()
     transform = estimate_transform(source, reference, config)
     aligned, footprint = apply_transform(
-        source, reference, transform, fill_value=config.fill_value
+        source,
+        reference,
+        transform,
+        fill_value=config.fill_value,
+        backend=config.backend,
     )
     return aligned, transform, footprint
 
@@ -166,6 +182,7 @@ def apply_transform_rgb(
     transform: SimilarityTransform,
     *,
     fill_value: float = np.nan,
+    backend: Backend = "cpu",
 ) -> tuple[FloatImage, np.ndarray]:
     """Apply one spatial transform identically to every RGB channel."""
     source_data = _as_rgb_image(source)
@@ -181,6 +198,7 @@ def apply_transform_rgb(
             reference_luminance,
             transform,
             fill_value=fill_value,
+            backend=backend,
         )
         channels.append(aligned)
         footprints.append(footprint)
@@ -230,7 +248,11 @@ def register_rgb_many(
                 _registration_luminance(image), reference_luminance, config
             )
             registered, _ = apply_transform_rgb(
-                image, reference, transform, fill_value=config.fill_value
+                image,
+                reference,
+                transform,
+                fill_value=config.fill_value,
+                backend=config.backend,
             )
         except Exception as error:
             if on_error == "raise":

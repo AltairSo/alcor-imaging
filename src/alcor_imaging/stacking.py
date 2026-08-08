@@ -9,6 +9,7 @@ from astropy.utils.exceptions import AstropyUserWarning
 from numpy.typing import ArrayLike
 
 from ._validation import FloatImage, as_image_sequence
+from .backend import resolve_backend
 from .models import RegistrationConfig, StackConfig, StackResult
 from .registration import register_many
 
@@ -76,6 +77,46 @@ def _combine_cube(
     return np.asarray(result, dtype=np.float32)
 
 
+def _combine_cube_gpu(
+    cube: np.ndarray,
+    config: StackConfig,
+    weights: np.ndarray,
+) -> FloatImage:
+    """CuPy implementation with iterative median/MAD sigma rejection."""
+    import cupy as cp
+
+    data = cp.asarray(cube, dtype=cp.float32)
+    if config.method.startswith("sigma_clip"):
+        rejected = ~cp.isfinite(data)
+        for _ in range(config.max_iterations):
+            visible = cp.where(rejected, cp.nan, data)
+            center = cp.nanmedian(visible, axis=0)
+            mad = cp.nanmedian(cp.abs(visible - center[None, ...]), axis=0)
+            deviation = 1.482602218505602 * mad
+            rejected |= (
+                cp.abs(data - center[None, ...])
+                > config.sigma * deviation[None, ...]
+            )
+        data = cp.where(rejected, cp.nan, data)
+
+    if config.method.endswith("median") or config.method == "median":
+        result = cp.nanmedian(data, axis=0)
+    elif config.method in {"mean", "sigma_clip_mean"}:
+        valid = cp.isfinite(data)
+        device_weights = cp.asarray(weights, dtype=cp.float32)[:, None, None]
+        weighted = cp.where(valid, data, 0.0) * device_weights
+        denominator = cp.sum(valid * device_weights, axis=0)
+        result = cp.divide(
+            cp.sum(weighted, axis=0),
+            denominator,
+            out=cp.full(cube.shape[1:], cp.nan, dtype=cp.float32),
+            where=denominator > 0,
+        )
+    else:
+        raise ValueError(f"Unknown stack method {config.method!r}.")
+    return cp.asnumpy(result).astype(np.float32, copy=False)
+
+
 def stack(
     images: Sequence[ArrayLike],
     config: StackConfig | None = None,
@@ -102,6 +143,7 @@ def stack(
     if tile_size < 1:
         raise ValueError("tile_size must be positive or None.")
     result = np.empty((height, width), dtype=np.float32)
+    selected_backend = resolve_backend(config.backend)
     for y0 in range(0, height, tile_size):
         for x0 in range(0, width, tile_size):
             y1, x1 = min(y0 + tile_size, height), min(x0 + tile_size, width)
@@ -111,7 +153,10 @@ def stack(
                     for index, image in enumerate(prepared)
                 ]
             ).astype(np.float32, copy=False)
-            result[y0:y1, x0:x1] = _combine_cube(cube, config, weight_array)
+            if selected_backend == "gpu":
+                result[y0:y1, x0:x1] = _combine_cube_gpu(cube, config, weight_array)
+            else:
+                result[y0:y1, x0:x1] = _combine_cube(cube, config, weight_array)
     return result
 
 

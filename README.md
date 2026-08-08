@@ -31,6 +31,85 @@ To update an existing Colab installation:
 
 Restart the Colab session after installation or upgrade.
 
+## Optional NVIDIA GPU backend
+
+The GPU extra installs CuPy for CUDA 12. In Colab, select an NVIDIA GPU runtime
+(T4, L4, A100, H100, or G4) before installing, then restart the session:
+
+```python
+%pip install -q --upgrade --no-cache-dir \
+  "alcor-imaging[notebook,gpu] @ git+https://github.com/AltairSo/alcor-imaging.git@main"
+```
+
+Confirm the actual device instead of assuming Colab granted the requested model:
+
+```python
+import alcor_imaging as ai
+
+print(ai.__version__)
+print(ai.backend_info("gpu"))
+```
+
+GPU execution is opt-in for existing APIs, preserving CPU behavior and results for
+current notebooks:
+
+```python
+registration = ai.RegistrationConfig(downsample=4, backend="gpu")
+stacking = ai.StackConfig(
+    method="sigma_clip_median",
+    tile_size=1024,
+    backend="gpu",
+)
+rendering = ai.RenderConfig(backend="gpu", tile_size=1024)
+```
+
+Star detection and transform estimation remain on the CPU. Full-resolution affine
+resampling, tiled stacking, Gaussian enhancement, mosaic composition, and RGB
+rendering can run on CUDA. FITS decoding and exports remain on the host.
+
+### Tiled GPU mosaic composition
+
+`compose_mosaic` accepts arbitrary mono or channel-last panels. The caller supplies
+source-to-canvas homogeneous transforms, output dimensions, weights, and any
+photometric correction. Nothing is inferred from an object name or directory.
+
+```python
+def progress(done, total):
+    print(f"Mosaic tiles: {done}/{total}", end="\r")
+
+# Each matrix maps source (x, y) into the common output canvas. A skimage
+# SimilarityTransform can be supplied as `transform.params`.
+linear_mosaic = ai.compose_mosaic(
+    panel_rgb,
+    panel_to_canvas_matrices,
+    output_shape=(6797, 8479),
+    backend="gpu",
+    tile_size=1536,       # lower to 1024 on T4/L4 if necessary
+    feather_width=256,
+    panel_weights=panel_integration_times,
+    panel_gains=panel_photometric_gains,
+    panel_offsets=panel_background_offsets,
+    progress=progress,
+)
+
+preview = ai.render_rgb(
+    linear_mosaic,
+    ai.RenderConfig(
+        backend="gpu",
+        tile_size=1024,
+        white_percentile=99.9,
+        faint_strength=35,
+        highlight_strength=6,
+    ),
+)
+```
+
+The compositor keeps source panels on the device for throughput but transfers the
+output one tile at a time. This prevents the repeated full-canvas temporary arrays
+that can exhaust standard Colab RAM. `backend="auto"` uses CUDA when available and
+otherwise falls back to CPU; `backend="gpu"` fails clearly if CUDA is unavailable.
+TPUs are not supported by the CuPy backend.
+
 ## Generic channel primitives
 
 The core has no built-in concept of Ha, OIII, LRGB, an object name, a telescope,
@@ -306,6 +385,8 @@ src/alcor_imaging/
   stacking.py     robust frame integration
   background.py   background modeling and subtraction
   geometry.py     common-overlap handling
+  backend.py      optional NumPy/CuPy backend selection and diagnostics
+  resample.py     CPU/GPU affine warping and tiled mosaic composition
   hdr.py          saturation-aware mixed-exposure integration
   stretch.py      normalization and nonlinear transfer functions
   color.py        palettes, channel mixing, luminance, saturation

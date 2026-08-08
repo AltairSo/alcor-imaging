@@ -39,6 +39,7 @@ class RegistrationConfig:
     min_area: int = 5
     transform: Literal["similarity"] = "similarity"
     fill_value: float = np.nan
+    backend: Literal["cpu", "gpu", "auto"] = "cpu"
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +51,7 @@ class StackConfig:
     max_iterations: int = 5
     normalization: Literal["none", "median", "multiplicative"] = "none"
     tile_size: int | None = 512
+    backend: Literal["cpu", "gpu", "auto"] = "cpu"
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +85,8 @@ class RenderConfig:
     gamma: float = 0.88
     saturation: float = 0.9
     highlight_knee: float = 0.82
+    backend: Literal["cpu", "gpu", "auto"] = "cpu"
+    tile_size: int = 1024
 
 
 @dataclass(frozen=True, slots=True)

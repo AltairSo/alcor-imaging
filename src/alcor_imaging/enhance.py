@@ -6,7 +6,7 @@ from scipy.ndimage import gaussian_filter
 from skimage.restoration import denoise_wavelet
 
 from ._validation import FloatImage, as_float_image
-from .color import apply_luminance, luminance
+from .backend import Backend, get_array_module, resolve_backend, to_host
 
 
 def wavelet_denoise(
@@ -40,15 +40,24 @@ def unsharp_mask(
     radius: float = 2.0,
     amount: float = 0.2,
     threshold: float = 0.0,
+    backend: Backend = "cpu",
 ) -> FloatImage:
     if radius <= 0 or amount < 0 or threshold < 0:
         raise ValueError("radius must be positive; amount and threshold must be non-negative.")
     data = as_float_image(image, ndim=None)
+    selected = resolve_backend(backend)
+    xp = get_array_module(selected)
+    device = xp.asarray(data)
     sigma = (radius, radius, 0) if data.ndim == 3 else radius
-    detail = data - gaussian_filter(data, sigma=sigma)
+    if selected == "gpu":
+        from cupyx.scipy.ndimage import gaussian_filter as selected_gaussian_filter
+    else:
+        selected_gaussian_filter = gaussian_filter
+    detail = device - selected_gaussian_filter(device, sigma=sigma)
     if threshold:
-        detail = np.where(np.abs(detail) >= threshold, detail, 0.0)
-    return np.clip(data + amount * detail, 0.0, 1.0).astype(np.float32)
+        detail = xp.where(xp.abs(detail) >= threshold, detail, 0.0)
+    result = xp.clip(device + amount * detail, 0.0, 1.0)
+    return np.asarray(to_host(result), dtype=np.float32)
 
 
 def local_contrast(
@@ -57,14 +66,29 @@ def local_contrast(
     radius: float = 12.0,
     amount: float = 0.1,
     signal_floor: float = 0.025,
+    backend: Backend = "cpu",
 ) -> FloatImage:
     """Enhance large-scale local detail with a signal-dependent mask."""
     data = as_float_image(image, ndim=None)
-    mono = luminance(data) if data.ndim == 3 else data
-    detail = mono - gaussian_filter(mono, sigma=radius)
-    mask = np.clip((mono - signal_floor) / max(0.2, signal_floor), 0.0, 1.0)
-    target = np.clip(mono + amount * detail * mask, 0.0, 1.0)
+    selected = resolve_backend(backend)
+    xp = get_array_module(selected)
+    device = xp.asarray(data)
+    mono = (
+        xp.einsum("...c,c->...", device, (0.2126, 0.7152, 0.0722))
+        if data.ndim == 3
+        else device
+    )
+    if selected == "gpu":
+        from cupyx.scipy.ndimage import gaussian_filter as selected_gaussian_filter
+    else:
+        selected_gaussian_filter = gaussian_filter
+    detail = mono - selected_gaussian_filter(mono, sigma=radius)
+    mask = xp.clip((mono - signal_floor) / max(0.2, signal_floor), 0.0, 1.0)
+    target = xp.clip(mono + amount * detail * mask, 0.0, 1.0)
     if data.ndim == 3:
-        return apply_luminance(data, target, ratio_limits=(0.8, 1.25))
-    return target.astype(np.float32)
-
+        ratio = target / xp.maximum(mono, 0.01)
+        ratio = xp.clip(ratio, 0.8, 1.25)
+        result = xp.clip(device * ratio[..., None], 0.0, 1.0)
+    else:
+        result = target
+    return np.asarray(to_host(result), dtype=np.float32)
