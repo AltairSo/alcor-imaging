@@ -45,7 +45,9 @@ def main():
             continue
         rawxy = np.column_stack([xy, np.ones(len(xy))]) @ np.linalg.inv(transforms[frame["name"]]).T
         maximum = []
-        with fits.open(frame["path"], memmap=True) as hdus:
+        # section reads only the requested cutout; scaled uint16 FITS cannot
+        # use strict memmap mode because their BZERO offset must be applied.
+        with fits.open(frame["path"], memmap=False) as hdus:
             for x, y, _ in rawxy:
                 x, y = round(x), round(y)
                 patch = hdus[0].section[y - 12 : y + 13, x - 12 : x + 13]
