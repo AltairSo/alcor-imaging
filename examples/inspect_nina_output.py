@@ -28,9 +28,11 @@ def main():
     y0, y1, x0, x1 = json.loads((out / "reports/crop_bin1.json").read_text())
     shape = (y1 - y0, x1 - x0)
     products = []
-    assert len(list((out / "linear").glob("*.fits"))) == 5
-    assert len(list((out / "final").glob("*.tif"))) == 3
-    for path in sorted((out / "linear").glob("*.fits")):
+    # Validate this target's original products; later calibrated/baseline exports
+    # may coexist in these directories when rerunning the notebook.
+    linear_paths = [out / f"linear/{args.target}_master_{c}_uncalibrated.fits" for c in "LRGB"]
+    linear_paths.append(out / f"linear/{args.target}_linear_RGB.fits")
+    for path in linear_paths:
         with fits.open(path, memmap=True) as hdul:
             a = hdul[0].data
             assert a.shape[-2:] == shape, path
@@ -39,7 +41,8 @@ def main():
                 if not np.isfinite(row).all():
                     raise ValueError(f"Nonfinite output: {path}")
             products.append({"file": path.name, "shape": a.shape, "dtype": str(a.dtype)})
-    for path in sorted((out / "final").glob("*.tif")):
+    for profile in ["natural", "enhanced", "inspection"]:
+        path = out / f"final/{args.target}_{profile}_fullres_16bit.tif"
         with tifffile.TiffFile(path) as tf:
             page = tf.pages[0]
             assert page.dtype == np.dtype("uint16") and page.shape == (*shape, 3)
