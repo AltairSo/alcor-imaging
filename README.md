@@ -437,3 +437,14 @@ The original equal-exposure `process_lrgb()` API remains unchanged. For callers
 that tile mixed-exposure integration, `hdr_combine()` and `hdr_combine_with_mask()`
 now accept `background_offsets` (one per input), so tiles use the same global sky
 estimate. Include a halo at least as wide as `saturation_dilation` when tiling.
+
+Open `examples/colab_nina_lrgb.ipynb` in Colab for the staged notebook version.
+After a full run, create native-sampling core/star/corner crops and validate all
+FITS/TIFF/PNG formats with:
+
+```bash
+python examples/inspect_nina_output.py --output "/data/target/alcor_output" \
+  --work "/tmp/alcor-target" --target M42
+```
+
+The checker saves `reports/validation_summary.json` and `reports/processing_report.txt`.
