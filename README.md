@@ -448,3 +448,62 @@ python examples/inspect_nina_output.py --output "/data/target/alcor_output" \
 ```
 
 The checker saves `reports/validation_summary.json` and `reports/processing_report.txt`.
+
+### Reference-star colour calibration (recommended for colour fidelity)
+
+The ensemble-star balance in the initial NINA preview is an empirical first pass.
+It assumes the average measured star is neutral; an uneven stellar population or
+contaminated apertures can give a misleading balance. The `natural` profile name
+only describes stretch strength. It does not certify accurate colour.
+
+After the native masters exist, run `examples/calibrate_nina_colour.py`. It matches
+APASS stars to the actual image, measures isolated stars with a local sky plane,
+and rejects close neighbours and poor aperture growth. It uses native master
+cutouts without loading whole frames. The APASS mode fits instrumental colours
+against catalogued B−V, using solar B−V = 0.653 as the white reference.
+
+For a documented sensor and filter model, Gaia mode integrates each accepted
+Gaia DR3 XP spectrum through the selected filter transmission and sensor QE,
+including the energy-to-photon conversion. Robust colour fits derive channel
+multipliers at a G2V white reference. Known Gaia variables and sources with high
+RUWE are excluded. An APASS result remains in the report as a separate cross-check.
+Spectra and catalogue responses are cached; only public coordinates/source IDs
+are requested, and no science image is uploaded.
+
+```bash
+# Model curves are separate public reference data. Pin the database for reproducibility.
+git clone https://gitlab.com/free-astro/siril-spcc-database.git /content/siril-spcc-database
+git -C /content/siril-spcc-database checkout 87af70a92ec1d0ff780bd3ea833aaa7b3b169cc2
+
+# These filter defaults are for the documented B20 setup ONLY.
+# Override filter/sensor/white-reference names for other equipment.
+python examples/calibrate_nina_colour.py \
+  --output '/path/to/alcor_output' --work '/path/to/alcor_work' --target M42 \
+  --method gaia --responses /content/siril-spcc-database --stage calibrate
+python examples/calibrate_nina_colour.py \
+  --output '/path/to/alcor_output' --work '/path/to/alcor_work' --target M42 \
+  --stage render
+```
+
+With unknown response curves, omit `--method gaia` and `--responses` to use the
+APASS approximation. Do not assume a filter brand from the camera or filter wheel.
+The [official B20 specification](https://www.omiastro.com/telescopes/gemini-b20-ag-idk14-5-asi6200mm)
+lists Astrodon Gen2 E-Series LRGB; the FITS headers only identify L/R/G/B.
+
+New products have `_reference_` in their filenames and leave the earlier display
+images and render parameters intact. `reports/colour_calibration/` preserves the
+star measurements, fits, bootstrap intervals, downloaded spectra, response models
+and their licence. Rendering is resumable from the saved calibration.
+
+This is a model-based broadband colour calibration, not a reconstruction of the
+complete nebular spectrum or human visual appearance. Sensor QE in the public
+reference database is digitized from an OEM plot; individual filter curves,
+atmospheric spectral effects, missing flats/darks and stellar variability can
+still introduce systematic error. Bootstrap intervals quantify sample variation,
+not those systematic effects. The G2V white reference and nonlinear display
+stretch are explicit choices.
+
+References: [Siril SPCC methodology](https://siril.readthedocs.io/en/stable/processing/color-calibration/spcc.html),
+[ESA Gaia spectral data access](https://www.cosmos.esa.int/web/gaia-users/archive/programmatic-access),
+[APASS DR9](https://cdsarc.cds.unistra.fr/viz-bin/cat/II/336),
+[solar B−V reference](https://arxiv.org/abs/1204.0828).

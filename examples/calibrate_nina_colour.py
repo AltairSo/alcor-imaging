@@ -15,6 +15,7 @@ import gc
 import hashlib
 import json
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -28,6 +29,7 @@ from astropy.table import Table
 from astropy.time import Time
 from astropy.wcs import WCS
 from process_nina_lrgb import colour_parameters, render, save_json
+from scipy.integrate import trapezoid
 from scipy.optimize import least_squares
 from scipy.spatial import cKDTree
 from skimage.measure import ransac
@@ -262,7 +264,7 @@ def response_values(record, wavelength):
 def spectral_photons(wavelength, energy_flux, response):
     # Photon count is proportional to energy flux * lambda / (h*c).
     # The common hc constant cancels in colour ratios.
-    return np.trapezoid(response * energy_flux * wavelength, wavelength, axis=-1)
+    return trapezoid(response * energy_flux * wavelength, wavelength, axis=-1)
 
 
 def load_response(directory, file, name):
@@ -308,21 +310,29 @@ def gaia_calibration(args, header, radius, objects, masters, native, wcs, matrix
     white_flux = spectral_photons(wavelength, response_values(white, wavelength), response)
     spectra = cache / "gaia_spectra"
     spectra.mkdir(exist_ok=True)
-    predicted, failures = [], []
-    for row in g:
-        source = str(row["source_id"])
+
+    def retrieve_spectrum(source):
         try:
-            f = fetch(
+            file = fetch(
                 spectra / f"{source}.xml",
                 "https://gea.esac.esa.int/data-server/data",
                 {"RETRIEVAL_TYPE": "XP_SAMPLED", "ID": source, "RELEASE": "Gaia DR3"},
             )
-            table = next(iter(parse(f).iter_tables())).to_table()
+            table = next(iter(parse(file).iter_tables())).to_table()
             flux = np.interp(wavelength, table["wavelength"], table["flux"])
-            predicted.append(spectral_photons(wavelength, flux, response))
-        except Exception as e:
-            failures.append({"source_id": source, "error": str(e)})
-            predicted.append([np.nan] * 3)
+            return spectral_photons(wavelength, flux, response), None
+        except Exception as error:
+            return [np.nan] * 3, {"source_id": source, "error": str(error)}
+
+    predicted, failures = [], []
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for number, (values, error) in enumerate(
+            pool.map(retrieve_spectrum, map(str, g["source_id"])), start=1
+        ):
+            predicted.append(values)
+            if error:
+                failures.append(error)
+            print(f"Gaia spectra: {number}/{len(g)}; {len(failures)} unavailable.", flush=True)
     predicted = np.array(predicted)
     result = {}
     for c, j in [("R", 0), ("B", 2)]:
