@@ -405,7 +405,11 @@ def colour_parameters(masters, gains=None):
     return {
         "backgrounds_adu_per_sec": backgrounds,
         "rgb_gains": gain.tolist(),
-        "colour_method": "empirical ensemble-star neutral balance; not photometric calibration",
+        "colour_method": (
+            "explicit user/reference gains"
+            if gains is not None
+            else "empirical ensemble-star neutral balance; not photometric calibration"
+        ),
         "colour_star_count": len(fluxes),
         "l_scale": lscale,
         "white": white,
@@ -444,7 +448,8 @@ def render_tile(masters, params, profile="natural"):
 def render(args, masters, factor, params=None):
     out = Path(args.output)
     params = params or colour_parameters(masters, args.gains)
-    save_json(out / f"reports/render_parameters_bin{factor}.json", params)
+    report_prefix = getattr(args, "report_prefix", "")
+    save_json(out / f"reports/{report_prefix}render_parameters_bin{factor}.json", params)
     h, w = masters["L"].shape
     for profile in ["natural", "enhanced", "inspection"]:
         output = np.lib.format.open_memmap(
