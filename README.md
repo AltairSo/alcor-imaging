@@ -507,3 +507,34 @@ References: [Siril SPCC methodology](https://siril.readthedocs.io/en/stable/proc
 [ESA Gaia spectral data access](https://www.cosmos.esa.int/web/gaia-users/archive/programmatic-access),
 [APASS DR9](https://cdsarc.cds.unistra.fr/viz-bin/cat/II/336),
 [solar B−V reference](https://arxiv.org/abs/1204.0828).
+
+### Observation-only baseline and the meaning of “reference”
+
+`_reference_` means that catalogued star fluxes/spectra set global RGB multipliers.
+It never means using an external astrophotograph. No external image pixels,
+nebular structures, generated detail, sharpening, or deconvolution enter the NINA
+workflow. `_enhanced_` selects a stronger linked asinh display stretch (55 versus
+25 for `_natural_`); both use 55% luminance modulation from the observation's own
+L master. The RGB inspection profile uses strength 15 and no L contribution.
+
+For a conservative comparison after reference calibration, run:
+
+```bash
+python examples/render_observation_baseline.py \
+  --output '/content/drive/MyDrive/Astro/B20/M42 Pre/alcor_output' \
+  --work /content/alcor_work --target M42
+```
+
+`_observation_baseline_RGB_` products retain the catalogue-derived channel gains
+but use RGB alone, a pointwise monotonic highlight shoulder, explicit sRGB display
+encoding and a small neutral display pedestal. Negative background fluctuations
+are retained until the final display mapping. This preserves more dark transitions
+and reduces harsh saturation; it does not recover data lost to detector clipping.
+The FITS masters remain linear and unmodified. Instrument RGB is still an
+approximation to display RGB, especially for emission-line nebulae.
+
+The report records raw-input inventory hashes, master/script hashes, exposure
+counts, display parameters, clipping statistics and a core comparison. Orange in
+the diagnostic panel marks raw samples at or above 98% of the detector ceiling;
+no such overlay or replacement is applied to the exported image. This baseline
+retains noise and gradients deliberately and is not a claim of production quality.
