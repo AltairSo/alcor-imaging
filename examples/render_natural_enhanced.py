@@ -163,7 +163,12 @@ def natural_tile(masters, params, safe_weight, mix=0.7, pedestal=0.035, chroma=0
     # Do not strengthen highlights with missing channels or unreliable L.
     blend = mix * safe_weight
     desired = blend * (bright @ WEIGHTS) + (1 - blend) * base_y
-    scale = np.where(base_y > 1e-5, desired / np.maximum(base_y, 1e-5), 1)
+    # Signed background noise can cancel to nearly zero luminance. A direct
+    # desired/base_y ratio would turn those faint colour fluctuations into spikes.
+    # Fade only the enhancement in this regime; retain the baseline samples.
+    faint_weight = np.clip(base_y / 0.08, 0, 1)
+    faint_weight = faint_weight**2 * (3 - 2 * faint_weight)
+    scale = 1 + faint_weight * (desired - base_y) / np.maximum(base_y, 0.08)
     image = base * scale[..., None]
     gray = (image @ WEIGHTS)[..., None]
     image = gray + chroma * (image - gray)
@@ -252,7 +257,7 @@ def main():
         hdus.append(fits.CompImageHDU(counts[c], name=f"VALID_{c}", compression_type="RICE_1"))
         hdus[-1].header["NFRAMES"] = frame_counts[c]
         hdus[-1].header["COMMENT"] = (
-            "0: no exposure without a >=98% saturated interpolation contributor."
+            "Usable: finite and no interpolation contributor at >=98% ceiling."
         )
     fits.HDUList(hdus).writeto(folder / "valid_exposure_counts.fits", overwrite=True)
     cx, cy = json.loads((out / "reports/validation_summary.json").read_text())[
@@ -294,6 +299,7 @@ def main():
         "luminance_weight": 0.55,
         "enhanced_brightness_mix": 0.7,
         "global_chroma_factor": 0.95,
+        "faint_enhancement_transition_display_luminance": 0.08,
         "display_pedestal": 0.035,
         "backgrounds": params["backgrounds_adu_per_sec"],
         "white": params["white"],
@@ -334,6 +340,8 @@ def main():
             "Partial-sample stacks may retain PSF differences between exposures.",
             "The 98% threshold is conservative; "
             "definite detector-ceiling loss is separately counted.",
+            "Availability also excludes nonfinite registration-edge samples; "
+            "partial rejection is not always detector clipping.",
             "No dark/flat correction, external image data, "
             "generated detail, or artificial core restoration.",
         ],

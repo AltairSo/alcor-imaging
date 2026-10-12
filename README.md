@@ -553,6 +553,8 @@ This third presentation retains the catalogue gains and combines restrained RGB
 colour with stronger brightness contrast and the observation's L detail. Its
 small global chroma reduction is an aesthetic setting, not another photometric
 calibration. Both earlier versions remain available.
+Enhancement fades at very low display luminance so signed background noise cannot
+produce large colour ratios when its weighted luminance nearly cancels to zero.
 
 Each raw input is checked against its inventory SHA-256. Saturation masks are
 resampled with the same bilinear footprint as the data. A sample is conservatively
@@ -564,8 +566,10 @@ channels remain usable. No channel is synthesized from another. L enhancement
 fades at and around missing-channel/invalid-L pixels.
 
 `reports/natural_enhanced/valid_exposure_counts.fits` contains compressed native
-count maps for L, R, G and B; zero denotes no fully usable exposure. The report
-separates partial rejection, missing individual channels, and missing all RGB
+count maps for L, R, G and B; zero denotes no fully usable exposure. Counts
+also exclude nonfinite registration-edge samples, so partial rejection does not
+necessarily mean detector clipping. The core comparison is inside the common field.
+The report separates partial rejection, missing individual channels, and missing all RGB
 channels. Definite clipping throughout every interpolation footprint at the
 actual detector ceiling is counted separately from the conservative 98% mask.
 The overlay is diagnostic only and never appears in the final image.

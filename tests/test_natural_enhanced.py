@@ -52,3 +52,19 @@ def test_saturation_weight_turns_off_luminance_boost_without_recolouring():
         ]
     )
     np.testing.assert_array_equal(safe, tiled)
+
+
+def test_signed_background_noise_does_not_become_bright_colour_spikes():
+    rng = np.random.default_rng(42)
+    params = {
+        "rgb_gains": [1, 1, 1],
+        "backgrounds_adu_per_sec": dict.fromkeys("LRGB", 0),
+        "white": 200,
+        "l_scale": 1,
+    }
+    masters = {c: rng.normal(0, 0.4, (200, 200)).astype("float32") for c in "LRGB"}
+    weight = np.ones((200, 200))
+    baseline = natural_tile(masters, params, weight, mix=0)
+    enhanced = natural_tile(masters, params, weight)
+    faint = baseline.max(-1) < 0.2
+    assert enhanced[faint].max() < 0.25
