@@ -99,7 +99,7 @@ def main():
             ["git", "rev-parse", "HEAD"], cwd=root, text=True
         ).strip(),
         "calibration_script_sha256": hashlib.sha256(
-            (root / "examples/calibrate_nina_colour.py").read_bytes()
+            (out / "scripts/calibrate_nina_colour.py").read_bytes()
         ).hexdigest(),
     }
     save_json(
