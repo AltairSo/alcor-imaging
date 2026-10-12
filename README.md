@@ -538,3 +538,40 @@ counts, display parameters, clipping statistics and a core comparison. Orange in
 the diagnostic panel marks raw samples at or above 98% of the detector ceiling;
 no such overlay or replacement is applied to the exported image. This baseline
 retains noise and gradients deliberately and is not a claim of production quality.
+
+### Natural Enhanced LRGB
+
+After producing the reference-calibrated and RGB-baseline versions, run:
+
+```bash
+python examples/render_natural_enhanced.py \
+  --output '/content/drive/MyDrive/Astro/B20/M42 Pre/alcor_output' \
+  --work /content/alcor_work --target M42
+```
+
+This third presentation retains the catalogue gains and combines restrained RGB
+colour with stronger brightness contrast and the observation's L detail. Its
+small global chroma reduction is an aesthetic setting, not another photometric
+calibration. Both earlier versions remain available.
+
+Each raw input is checked against its inventory SHA-256. Saturation masks are
+resampled with the same bilinear footprint as the data. A sample is conservatively
+rejected if any contributing detector pixel reaches 98% of its ceiling. Usable
+exposures are combined independently per filter. Pixels with no rejected samples
+retain the original master exactly. Where a channel has no usable exposure, its
+original measured value remains in the display but is explicitly flagged; other
+channels remain usable. No channel is synthesized from another. L enhancement
+fades at and around missing-channel/invalid-L pixels.
+
+`reports/natural_enhanced/valid_exposure_counts.fits` contains compressed native
+count maps for L, R, G and B; zero denotes no fully usable exposure. The report
+separates partial rejection, missing individual channels, and missing all RGB
+channels. Definite clipping throughout every interpolation footprint at the
+actual detector ceiling is counted separately from the conservative 98% mask.
+The overlay is diagnostic only and never appears in the final image.
+
+This pass expects equal exposure durations within each filter, matching the
+current dataset. Mixed-duration observations require the HDR integration path.
+Adding 1s, 2s and 5s brackets is useful only when inspecting the raw frames confirms
+that the shortest exposures are unsaturated in every required channel. A display
+stretch cannot substitute for those measurements.
