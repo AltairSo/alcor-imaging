@@ -29,6 +29,7 @@ from skimage.transform import SimilarityTransform
 
 from alcor_imaging import (
     StackConfig,
+    hdr_combine_with_mask,
     luminance,
     stack,
     warp_affine,
@@ -315,20 +316,15 @@ def integrate(args, rows, records, factor):
         for y in range(0, master.shape[0], 256):
             tile = [a[y : y + 256] for a in arrays]
             if mixed:
-                # Pre-remove globally measured backgrounds; disable tile-local backgrounds
-                # by calling a bounded exposure-aware combination with fixed offsets.
-                acc = np.zeros(tile[0].shape, np.float32)
-                den = np.zeros_like(acc)
-                for a, row, bg in zip(tile, selected, backgrounds, strict=True):
-                    good = np.isfinite(a) & (a < 0.98 * row["saturation"])
-                    acc += np.where(good, a - bg, 0)
-                    den += good * row["exposure"]
-                combined = np.divide(acc, den, out=np.full_like(acc, np.nan), where=den > 0)
-                for j in np.argsort(times):
-                    fallback = (tile[j] - backgrounds[j]) / times[j]
-                    use = ~np.isfinite(combined) & np.isfinite(fallback)
-                    combined[use] = fallback[use]
-                master[y : y + 256] = combined
+                # Include a halo for saturation-mask dilation at tile boundaries.
+                lo, hi = max(0, y - 2), min(master.shape[0], y + 258)
+                combined, _lost = hdr_combine_with_mask(
+                    [a[lo:hi] for a in arrays],
+                    times,
+                    saturation_levels=[r["saturation"] for r in selected],
+                    background_offsets=backgrounds,
+                )
+                master[y : y + 256] = combined[y - lo : min(y + 256, master.shape[0]) - lo]
             else:
                 master[y : y + 256] = (
                     stack(tile, StackConfig(method=args.stack, tile_size=512)) / times[0]
@@ -462,7 +458,8 @@ def render(args, masters, factor, params=None):
                 {c: a[y : y + 256] for c, a in masters.items()}, params, profile
             )
         output.flush()
-        sampled = output[:: max(1, w // 2400), :: max(1, w // 2400)]
+        preview_bin = max(1, int(np.ceil(w / 2800)))
+        sampled = np.stack([bin_mean(output[..., i], preview_bin) for i in range(3)], axis=-1)
         im = Image.fromarray(np.uint8(np.round(255 * sampled)))
         im.thumbnail((2800, 2800), Image.Resampling.LANCZOS)
         im.save(out / f"previews/{args.target}_{profile}_preview.png")
@@ -491,7 +488,9 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--work", default="/tmp/alcor_lrgb_work")
     parser.add_argument("--target", default="target")
-    parser.add_argument("--stage", choices=["inspect", "preview", "full"], default="preview")
+    parser.add_argument(
+        "--stage", choices=["inspect", "preview", "full", "render"], default="preview"
+    )
     parser.add_argument("--stack", choices=["median", "mean", "sigma_clip_mean"], default="median")
     parser.add_argument("--gains", nargs=3, type=float)
     parser.add_argument("--saturation", type=float)
@@ -507,7 +506,9 @@ def main():
         rows = json.loads((out / "reports/metadata_summary.json").read_text())
         records = json.loads((out / "reports/registration_report.json").read_text())
         # Refuse accidentally processing a different folder from a previous run.
-        if any(Path(r["path"]).parent.resolve() != Path(args.input).resolve() for r in rows):
+        if any(
+            not Path(r["path"]).resolve().is_relative_to(Path(args.input).resolve()) for r in rows
+        ):
             parser.error("Inventory belongs to a different input; rerun preview.")
     save_json(out / "reports/processing_parameters.json", vars(args))
     shutil.copy2(__file__, out / "scripts/process_nina_lrgb.py")
@@ -525,13 +526,28 @@ def main():
             "Pillow",
         ]
     }
-    save_json(out / "scripts/environment.json", {"python": sys.version, "packages": versions})
+    save_json(
+        out / "scripts/environment.json",
+        {
+            "python": sys.version,
+            "packages": versions,
+            "script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        },
+    )
     if args.stage == "inspect":
         return
-    factor = 1 if args.stage == "full" else 4
-    masters, _crop = integrate(args, rows, records, factor)
+    factor = 1 if args.stage in {"full", "render"} else 4
+    if args.stage == "render":
+        y0, y1, x0, x1 = json.loads((out / "reports/crop_bin1.json").read_text())
+        masters = {
+            c: np.load(work / f"master_{c}_bin1.npy", mmap_mode="r")[y0:y1, x0:x1] for c in "LRGB"
+        }
+    else:
+        masters, _crop = integrate(args, rows, records, factor)
     params = None
     if factor == 1:
+        params = json.loads((out / "reports/render_parameters_bin4.json").read_text())
+    if args.stage == "full":
         # Keep the preview's chosen colour/curve parameters for the final image.
         params = json.loads((out / "reports/render_parameters_bin4.json").read_text())
         for c, a in masters.items():

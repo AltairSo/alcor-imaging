@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from scipy.ndimage import gaussian_filter
 
 from alcor_imaging import (
@@ -15,8 +16,7 @@ def test_hdr_combine_uses_short_exposure_for_saturated_core() -> None:
     flux[22:26, 22:26] = 500.0
     exposures = (60.0, 300.0)
     images = [
-        np.clip(flux * exposure + 200.0, 0, 65535).astype(np.float32)
-        for exposure in exposures
+        np.clip(flux * exposure + 200.0, 0, 65535).astype(np.float32) for exposure in exposures
     ]
     combined = hdr_combine(
         images,
@@ -60,9 +60,7 @@ def test_lrgb_pipeline_builds_color_and_injects_luminance() -> None:
         config=LRGBConfig(
             registration=RegistrationConfig(downsample=1, min_area=3),
             rgb_stretch=StretchConfig(black_percentile=0, white_percentile=99.99),
-            luminance_stretch=StretchConfig(
-                black_percentile=0, white_percentile=99.99
-            ),
+            luminance_stretch=StretchConfig(black_percentile=0, white_percentile=99.99),
             saturation_level=65535,
             denoise_strength=0,
         ),
@@ -91,3 +89,32 @@ def test_lrgb_rejects_invalid_luminance_highlight_range() -> None:
                 luminance_highlight_range=(0.9, 0.5),
             ),
         )
+
+
+def test_explicit_backgrounds_make_tiled_hdr_match_whole_image():
+    from alcor_imaging import hdr_combine_with_mask
+
+    yy, xx = np.indices((40, 32))
+    flux = (2 + yy + xx).astype(np.float32)
+    exposures = [2.0, 20.0]
+    offsets = [100.0, 150.0]
+    images = [np.minimum(flux * t + b, 1000) for t, b in zip(exposures, offsets, strict=True)]
+    kwargs = dict(saturation_levels=[1000, 1000], background_offsets=offsets)
+    whole, mask = hdr_combine_with_mask(images, exposures, **kwargs)
+    pieces = []
+    masks = []
+    for start in range(0, 40, 10):
+        lo, hi = max(0, start - 2), min(40, start + 12)
+        tile, lost = hdr_combine_with_mask([a[lo:hi] for a in images], exposures, **kwargs)
+        pieces.append(tile[start - lo : start - lo + 10])
+        masks.append(lost[start - lo : start - lo + 10])
+    np.testing.assert_allclose(np.concatenate(pieces), whole)
+    np.testing.assert_allclose(whole, flux)
+    np.testing.assert_array_equal(np.concatenate(masks), mask)
+
+
+def test_hdr_rejects_invalid_explicit_backgrounds():
+    from alcor_imaging import hdr_combine_with_mask
+
+    with pytest.raises(ValueError, match="background_offsets"):
+        hdr_combine_with_mask([np.ones((8, 8))], [2.0], background_offsets=[float("nan")])

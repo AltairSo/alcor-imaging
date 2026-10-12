@@ -394,3 +394,46 @@ src/alcor_imaging/
   export.py       explicit TIFF and PNG output
   pipeline.py     configurable HOO/SHO orchestration
 ```
+
+## NINA mono LRGB in Colab
+
+`examples/process_nina_lrgb.py` processes a directory of monochrome L/R/G/B FITS
+files without telescope-specific frame counts, exposure times, or colour gains.
+The workflow checks header/filename agreement, hashes inputs, measures star shapes,
+estimates transforms from unsaturated stars, and resamples each frame once directly
+into the best L frame's coordinate system. Arrays are cached on local disk and
+integration/rendering is tiled for ordinary Colab RAM.
+
+```bash
+python examples/process_nina_lrgb.py --input "/data/target" \
+  --output "/data/target/alcor_output" --work "/tmp/alcor-target" \
+  --target M42 --stage preview
+# Inspect previews and reports before running the full native-resolution export.
+python examples/process_nina_lrgb.py --input "/data/target" \
+  --output "/data/target/alcor_output" --work "/tmp/alcor-target" \
+  --target M42 --stage full
+```
+
+Outputs include a raw contact sheet, input inventory, alignment residuals, four
+linear ADU/s FITS masters, a separate linear RGB cube, three display profiles,
+16-bit RGB TIFFs, and PNGs. `--stage render` repeats just the display exports from
+cached full-resolution masters. Keep the work directory until rendering is complete.
+Use a unique output/work directory for each target and rerun preview after changing
+inputs. `--stack mean` or `--stack sigma_clip_mean` changes equal-exposure integration;
+the default median is conservative for a small number of uncalibrated frames.
+Mixed exposures use Alcor's flux-rate HDR combination with explicit global
+backgrounds. Pixels saturated in every exposure cannot be recovered.
+
+This is an **uncalibrated first-pass workflow**: it does not automatically match darks
+or flats, and all generated masters are labelled accordingly. Colour balance is an
+empirical ensemble-star approximation, not catalogue-based photometric calibration.
+The display applies a scalar background offset, moderate (55%) luminance enhancement,
+and a monotonic linked asinh curve with hue-preserving highlight compression.
+No generative imaging, sharpening, spatial gradient fitting, or star removal is used.
+`--gains R G B` overrides the empirical colour gains. For non-uint16 FITS, specify
+`--saturation` from detector metadata rather than the image's brightest pixel.
+
+The original equal-exposure `process_lrgb()` API remains unchanged. For callers
+that tile mixed-exposure integration, `hdr_combine()` and `hdr_combine_with_mask()`
+now accept `background_offsets` (one per input), so tiles use the same global sky
+estimate. Include a halo at least as wide as `saturation_dilation` when tiling.

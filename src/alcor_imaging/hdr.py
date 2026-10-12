@@ -18,6 +18,7 @@ def _hdr_combine(
     saturation_fraction: float = 0.98,
     saturation_dilation: int = 2,
     background_percentile: float = 20.0,
+    background_offsets: Sequence[float] | None = None,
 ) -> tuple[FloatImage, np.ndarray]:
     """Combine aligned mixed-exposure masters into a linear flux-rate image.
 
@@ -25,6 +26,7 @@ def _hdr_combine(
     individual-subframe exposure. Saturated pixels are excluded before weighting.
     ``weights`` should describe effective integration time when inputs are themselves
     master stacks; otherwise individual exposure times are a reasonable default.
+    Explicit background_offsets permit bounded tiles to share global backgrounds.
     """
     prepared = as_image_sequence(images)
     exposure_array = np.asarray(exposures, dtype=np.float64)
@@ -51,6 +53,12 @@ def _hdr_combine(
     if saturation_dilation < 0:
         raise ValueError("saturation_dilation cannot be negative.")
     validate_percentile(background_percentile, "background_percentile")
+    if background_offsets is not None:
+        offsets = np.asarray(background_offsets, dtype=np.float64)
+        if offsets.shape != (len(prepared),) or not np.all(np.isfinite(offsets)):
+            raise ValueError("background_offsets must contain one finite value per image.")
+    else:
+        offsets = None
 
     weighted_sum = np.zeros(prepared[0].shape, dtype=np.float64)
     weight_sum = np.zeros(prepared[0].shape, dtype=np.float64)
@@ -60,7 +68,11 @@ def _hdr_combine(
         if finite_values.size == 0:
             flux_images.append(np.full_like(image, np.nan))
             continue
-        background = float(np.percentile(finite_values, background_percentile))
+        background = (
+            float(np.percentile(finite_values, background_percentile))
+            if offsets is None
+            else float(offsets[index])
+        )
         flux = ((image - background) / exposure_array[index]).astype(np.float32)
         flux_images.append(flux)
         saturated = image >= saturation_fraction * saturation_array[index]
@@ -100,6 +112,7 @@ def hdr_combine(
     saturation_fraction: float = 0.98,
     saturation_dilation: int = 2,
     background_percentile: float = 20.0,
+    background_offsets: Sequence[float] | None = None,
 ) -> FloatImage:
     """Combine aligned mixed-exposure masters into a linear flux-rate image."""
     result, _ = _hdr_combine(
@@ -110,6 +123,7 @@ def hdr_combine(
         saturation_fraction=saturation_fraction,
         saturation_dilation=saturation_dilation,
         background_percentile=background_percentile,
+        background_offsets=background_offsets,
     )
     return result
 
@@ -123,6 +137,7 @@ def hdr_combine_with_mask(
     saturation_fraction: float = 0.98,
     saturation_dilation: int = 2,
     background_percentile: float = 20.0,
+    background_offsets: Sequence[float] | None = None,
 ) -> tuple[FloatImage, np.ndarray]:
     """Return an HDR master and pixels clipped in every supplied exposure."""
     return _hdr_combine(
@@ -133,4 +148,5 @@ def hdr_combine_with_mask(
         saturation_fraction=saturation_fraction,
         saturation_dilation=saturation_dilation,
         background_percentile=background_percentile,
+        background_offsets=background_offsets,
     )
