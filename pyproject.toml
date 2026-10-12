@@ -21,7 +21,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "numpy>=1.26,<2.1",
+  "numpy>=1.26,<3",
   "scipy>=1.11",
   "astropy>=6.0",
   "scikit-image>=0.22",
