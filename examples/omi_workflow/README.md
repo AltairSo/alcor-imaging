@@ -39,6 +39,30 @@ The folder route stages a ZIP on temporary Colab disk. Use individual night fold
 
 The modules are deliberately examples/orchestration, so the Alcor core remains independent of Dropbox, Drive and credential management.
 
+## Finished presentations
+
+The notebook now defaults to 2×2 integration and runs `finish.py` after stacking.
+The original `colour_quicklook.png` is a screening product; use the files in
+`finished/` for presentation. Native resolution remains available with binning=1.
+
+Finishing uses common low-emission sky anchors, star-excluded global diffuse
+scales, wavelet denoising, a fixed narrowband matrix, soft monotonic highlight
+compression, bounded saturation and modest luminance contrast. RGB balance uses
+unsaturated stellar apertures and is empirical, not catalogue photometric
+calibration. HOO amber/blue is explicitly a two-filter alternative; it does not
+claim missing SII data. Single-filter data stay monochrome. All parameters and
+export checks are saved in `render_report.json`; scientific masters are unchanged.
+
+No external photograph, generated structure or replacement star is used. The
+optional constrained background-plane fit is off by default because broad real
+nebulosity can resemble a sky gradient. These remain lights-only results until
+matching detector calibration is supplied.
+
+An explicitly supplied `halo_models` setting can subtract a measured smooth
+stellar halo for a reviewed target. It is never inferred or enabled by default;
+the model, strength and minimum fitted radius must be recorded. Inner radii
+below that minimum are capped rather than extrapolated into the stellar core.
+
 Rebuild the embedded notebook after changing sources:
 
 ```bash

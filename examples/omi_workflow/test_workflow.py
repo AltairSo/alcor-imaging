@@ -128,3 +128,29 @@ def test_repeated_folder_import_refreshes_updated_night(tmp_path,monkeypatch):
     records=archive.import_folder_link(url,tmp_path/'drive','night',tmp_path/'stage')
     assert len(records)==2 and (tmp_path/'drive/raw/night/b.fits').exists()
     assert not list((tmp_path/'stage').glob('*.zip'))
+
+
+def test_finishing_curve_preserves_order_without_hard_highlight_clipping():
+    from finish import tone
+    x=np.logspace(-6,6,1000)
+    y=tone(x)
+    assert np.all(np.diff(y)>0) and y.min()>.011 and y.max()<1
+
+
+def test_gamut_compression_preserves_chroma_direction():
+    from finish import compress_gamut
+    rgb=np.array([[1.4,.3,-.2],[.1,.2,.3]],dtype=np.float32)
+    gray=np.array([.4,.2],dtype=np.float32)
+    out=compress_gamut(rgb,gray)
+    assert out.min()>=.01199 and out.max()<=.99001
+    np.testing.assert_allclose(out[1],rgb[1],atol=1e-7)
+    before=rgb[0]-gray[0];after=out[0]-gray[0]
+    np.testing.assert_allclose(after/np.linalg.norm(after),before/np.linalg.norm(before),atol=1e-6)
+
+
+def test_common_crop_excludes_missing_coverage():
+    from finish import common_crop
+    a=np.ones((120,160),np.float32);a[:10]=np.nan;a[:,:12]=np.nan
+    crop=common_crop([a,np.ones_like(a)])
+    y0,y1,x0,x1=crop
+    assert np.isfinite(a[y0:y1,x0:x1]).all()

@@ -8,13 +8,13 @@ CORE_REF='23bbf079057d1546f55a0c158f74f4d38cd7ee05'
 
 
 def build(destination=None):
-    modules={name:(HERE/name).read_text() for name in ['archive.py','quality.py','process.py','report.py','test_workflow.py']}
+    modules={name:(HERE/name).read_text() for name in ['archive.py','quality.py','process.py','finish.py','report.py','test_workflow.py']}
     cells=[]
     def md(text):cells.append({'cell_type':'markdown','metadata':{},'source':text.splitlines(True)})
     def code(text,form=False):cells.append({'cell_type':'code','metadata':{'cellView':'form'} if form else {},'execution_count':None,'outputs':[],'source':text.splitlines(True)})
     md('''# OMI → Colab → Google Drive
 
-Archive original FITS, screen each exposure, register and integrate suitable lights on the GPU, and save masters plus colour quicklooks to Drive.
+Archive original FITS, screen each exposure, register and integrate suitable lights on the GPU, and save linear masters plus finished PNG/TIFF presentations to Drive.
 
 **Next session:** paste the shared Dropbox link for that observing-night folder, choose **New night folder**, enter its date label and the target name shown in the FITS header, then **Run all**. Your laptop does not download or process the images. A personal Dropbox account is not required.
 
@@ -27,8 +27,9 @@ NEW_NIGHT_LINK = "" #@param {type:"string"}
 NEW_NIGHT_LABEL = "" #@param {type:"string"}
 TARGET = "Heart Nebula" #@param {type:"string"}
 OBSERVING_NIGHT = "2026-11-01" #@param {type:"string"}
-BINNING = 4 #@param [1, 2, 4] {type:"raw"}
+BINNING = 2 #@param [1, 2, 4] {type:"raw"}
 RUN_PROCESSING = True #@param {type:"boolean"}
+FINISH_IMAGES = True #@param {type:"boolean"}
 DISPLAY_IMAGES = False #@param {type:"boolean"}
 ARCHIVE_PATH = "/content/drive/MyDrive/Astro/OMI_Archive" #@param {type:"string"}
 ''',True)
@@ -101,18 +102,28 @@ print('Report:',ROOT/'QUALITY_REPORT.md')
 ''',True)
     md('''### Integrate and render
 
-The default **4×4 binning** produces efficient review masters. Use **1** for native resolution. Registration must pass star-match, residual and scale checks. Different camera/gain/geometry groups are not silently mixed. At least three registered frames per channel are required.
+The default **2×2 binning** produces presentation masters. Use **1** for native resolution or **4** for faster review. Registration must pass star-match, residual and scale checks. Different camera/gain/geometry groups are not silently mixed. At least three registered frames per channel are required.
 
-SHO maps SII→red, Hα→green, OIII→blue; HOO maps Hα→red and OIII→green/blue. A single filter stays monochrome. Global display gains are documented; RGB is an approximate preview until reference-star colour calibration is performed. No reference-photo pixels, generated structure, or local hue patches are added.''')
+The screening quicklook is saved separately. Finishing restores the earlier B20 method: common sky anchors, star-excluded diffuse scales, wavelet noise reduction, global colour matrices, soft highlights and modest luminance contrast. Linear masters remain unchanged.
+
+HOO and its amber/blue alternative both use only Hα and OIII; SHO requires measured SII as well. A single filter stays monochrome. RGB uses empirical unsaturated-star balance, not catalogue photometric calibration. Global display choices are recorded in `finished/render_report.json`. No reference-photo pixels, generated structure, local hue patches or replacement stars are added.''')
     code('''#@title 6. Process the chosen target on the GPU and save results
 from process import process_target
 if RUN_PROCESSING:
     result=process_target(ROOT,TARGET,night=OBSERVING_NIGHT or None,binning=int(BINNING),backend='gpu')
     print(json.dumps(result,indent=2))
     print('Results:',result['output'])
+    preview=Path(result['output'])/'colour_quicklook.png'
+    if FINISH_IMAGES:
+        from finish import render
+        presentation=render(result)
+        print('Finished presentations:',presentation['output'])
+        available=presentation['exports']
+        preferred=next((p for p in ['SHO','HOO','RGB'] if p in available),next(iter(available)))
+        preview=Path(presentation['output'])/(preferred+'.png')
     if DISPLAY_IMAGES:
         from IPython.display import display,Image
-        display(Image(filename=str(Path(result['output'])/'colour_quicklook.png'),width=1000))
+        display(Image(filename=str(preview),width=1000))
 else:
     print('Archive and quality report complete. Processing disabled in configuration.')
 ''',True)
@@ -124,6 +135,7 @@ OMI_Archive/
   receipts/                  per-file SHA-256 and transfer receipts
   quality/                   measurements, decisions, caches and review sheets
   processed/<target>/<run>/  linear FITS masters, PNG, 16-bit TIFF, coverage, provenance
+    finished/                presentation PNG/TIFF, previews and rendering parameters
   workflow/                  exact scripts and environment used
   QUALITY_REPORT.md
 ```
