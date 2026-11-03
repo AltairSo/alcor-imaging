@@ -35,7 +35,7 @@ The workflow does not invent calibration frames. Current supplied lights are not
 
 SHO/HOO are explicitly mapped colour palettes. RGB is an approximate preview until reference-star calibration is performed. Display gains are global and recorded. There is no external-image blending, generative detail, star replacement, or local hue patch mapping.
 
-The folder route stages a ZIP on temporary Colab disk. Use individual night folders rather than a huge root archive. Completed files survive on Drive; a runtime interruption may require downloading the current ZIP again. Per-file imports retry incomplete files and verify receipts on resume. Existing originals with different bytes are never overwritten. Shared-link manifests contain access-bearing URLs and must stay private.
+The folder route stages a ZIP on temporary Colab disk. Use individual night folders rather than a huge root archive. Repeated imports refresh the shared folder snapshot so newly arrived exposures are included. Completed ZIP staging files are removed after the originals and receipts are safely archived. An interrupted extraction can explicitly reuse its existing ZIP with `refresh=False`; normal runs always refresh. Per-file imports retry incomplete files and verify receipts on resume. Existing originals with different bytes are never overwritten. Shared-link manifests contain access-bearing URLs and must stay private.
 
 The modules are deliberately examples/orchestration, so the Alcor core remains independent of Dropbox, Drive and credential management.
 

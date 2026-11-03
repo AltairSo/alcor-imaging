@@ -139,7 +139,7 @@ def import_manifest(manifest, root, workers=4):
     return results
 
 
-def import_folder_link(url, root, label, staging="/content/omi_staging"):
+def import_folder_link(url, root, label, staging="/content/omi_staging", *, refresh=True, keep_staging=False):
     """Future runs: paste one observing-night folder link, no file list needed.
 
     Downloads a ZIP to Colab's temporary disk, safely extracts into Drive,
@@ -150,7 +150,9 @@ def import_folder_link(url, root, label, staging="/content/omi_staging"):
     stage = Path(staging); stage.mkdir(parents=True, exist_ok=True)
     key = hashlib.sha256(url.encode()).hexdigest()[:16]
     zip_path = stage / (key + ".zip")
-    if not zip_path.exists() or not zipfile.is_zipfile(zip_path):
+    # A shared night folder may receive more exposures. Do not silently reuse
+    # an older ZIP snapshot; reuse is only an explicit extraction-resume option.
+    if refresh or not zip_path.exists() or not zipfile.is_zipfile(zip_path):
         tmp = zip_path.with_suffix(".part")
         with requests.get(download_url(url), stream=True, timeout=(30, 180)) as r:
             r.raise_for_status()
@@ -201,4 +203,6 @@ def import_folder_link(url, root, label, staging="/content/omi_staging"):
                  "night": label, "status": "archived", "fits_error": fits_error}
             atomic_json(receipt, r); results.append(r)
     atomic_json(root / "folder_imports" / (key + ".json"), results)
+    if not keep_staging:
+        zip_path.unlink()  # verified originals and receipts are already on Drive
     return results

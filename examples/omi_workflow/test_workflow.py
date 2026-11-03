@@ -113,3 +113,18 @@ def test_metadata_only_sync_file_is_not_a_failed_exposure(tmp_path):
     path=root/'raw/sync.fits';fits.PrimaryHDU().writeto(path)
     r=inspect_one(path,root)
     assert r['status']=='non_image' and r['night']=='root'
+
+
+def test_repeated_folder_import_refreshes_updated_night(tmp_path,monkeypatch):
+    def zipped(names):
+        b=io.BytesIO()
+        with zipfile.ZipFile(b,'w') as z:
+            for name in names:z.writestr(name,payload())
+        return b.getvalue()
+    incoming=iter([zipped(['a.fits']),zipped(['a.fits','b.fits'])])
+    monkeypatch.setattr(archive.requests,'get',lambda *a,**k:Response(next(incoming)))
+    url='https://www.dropbox.com/folder'
+    archive.import_folder_link(url,tmp_path/'drive','night',tmp_path/'stage',keep_staging=True)
+    records=archive.import_folder_link(url,tmp_path/'drive','night',tmp_path/'stage')
+    assert len(records)==2 and (tmp_path/'drive/raw/night/b.fits').exists()
+    assert not list((tmp_path/'stage').glob('*.zip'))
