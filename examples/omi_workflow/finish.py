@@ -147,14 +147,19 @@ def compress_gamut(rgb, gray):
     return np.clip(gray[...,None]+d*scale[...,None],.012,.99)
 
 
-def render(report, *, settings=None, output_name='finished', parameters=None):
+def presentation_settings(palette, overrides=None):
     defaults={'denoise':.88,'smooth_native':3.2,'saturation':1.55,'power':1.08,
               'oxygen':.7,'local_contrast':.22,'strength':8,'shoulder':1.9}
-    if 'R' in report['channels']:
+    if palette=='RGB':
         defaults.update(saturation=1.15,strength=6,shoulder=2,local_contrast=.15)
-    if len(report['channels'])==1:
+    elif palette.endswith('_Monochrome'):
         defaults.update(saturation=1,local_contrast=.24,strength=8,shoulder=1.8)
-    settings={**defaults,**(settings or {})}
+    return {**defaults,**(overrides or {})}
+
+
+def render(report, *, settings=None, output_name='finished', parameters=None):
+    overrides=dict(settings or {})
+    settings=presentation_settings('SHO',overrides)
     source=Path(report.get('source_run',report['output']))
     inp=Path(report['output']);binning=int(report['binning'])
     p=parameters or prepare(source,plane=settings.get('plane',False))
@@ -198,15 +203,17 @@ def render(report, *, settings=None, output_name='finished', parameters=None):
     mono='Ha' if 'Ha' in ch else p['channels'][0]
     if not palettes:palettes[mono+'_Monochrome']=np.repeat(np.maximum(ch[mono]/sc[mono],0)[...,None],3,-1)
     icc=ImageCms.ImageCmsProfile(ImageCms.createProfile('sRGB')).tobytes()
-    exports={}
+    exports={};palette_settings={}
     for name,rgb in palettes.items():
-        img=tone(rgb,strength=float(settings.get('strength',6)),shoulder=float(settings.get('shoulder',2)))
+        display=presentation_settings(name,overrides)
+        palette_settings[name]=display
+        img=tone(rgb,strength=float(display['strength']),shoulder=float(display['shoulder']))
         # A common display curve and saturation adjustment; no spatial hue map.
-        img=.012+.975*np.power(np.clip((img-.012)/.975,0,1),float(settings.get('power',1.08)))
+        img=.012+.975*np.power(np.clip((img-.012)/.975,0,1),float(display['power']))
         lum=img@np.array([.2126,.7152,.0722],np.float32)
-        saturation=float(settings.get('saturation',1.45 if name.startswith(('HOO','SHO')) else 1.15))
+        saturation=float(display['saturation'])
         img=lum[...,None]+saturation*(img-lum[...,None])
-        amount=float(settings.get('local_contrast',.18))
+        amount=float(display['local_contrast'])
         detail=gaussian_filter(lum,2/binning)-gaussian_filter(lum,40/binning)
         ratio=np.clip((lum+amount*detail)/np.maximum(lum,.012),.8,1.2)
         img*=ratio[...,None]
@@ -219,7 +226,7 @@ def render(report, *, settings=None, output_name='finished', parameters=None):
         exports[name]={'shape':list(img.shape),'min':float(img.min()),'max':float(img.max()),
                        'black_fraction':float((img.max(-1)==0).mean()),'clipped_fraction':float((img.max(-1)>=1).mean())}
     result={'target':report['target'],'input_run':str(inp),'source_run':str(source),'binning':binning,
-            'parameters':p,'settings':settings,'metrics':metrics,'exports':exports,'output':str(out),
+            'parameters':p,'settings':settings,'palette_settings':palette_settings,'metrics':metrics,'exports':exports,'output':str(out),
             'limitations':['Lights only; not dark/flat calibrated.','Global mapped narrowband colours; RGB uses empirical stellar balance, not catalogue calibration.',
                           'Monotonic per-channel display curve; presentation pixels are not photometric fluxes.'],
             'method':'B20 global matrix and soft highlight curve; wavelet noise reduction; no external or generated detail.'}

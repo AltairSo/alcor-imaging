@@ -65,6 +65,11 @@ for name,source in MODULES.items():(saved/name).write_text(source)
 checks=subprocess.run([sys.executable,'-m','pytest','-q',str(WORK/'test_workflow.py')],cwd=WORK,capture_output=True,text=True)
 print(checks.stdout)
 assert checks.returncode==0, checks.stderr
+import importlib
+importlib.invalidate_caches()
+for filename in MODULES:
+    module=filename.removesuffix('.py')
+    if module in sys.modules:importlib.reload(sys.modules[module])
 ''',True)
     md('''### Transfer and archive
 

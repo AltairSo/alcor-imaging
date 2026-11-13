@@ -45,6 +45,11 @@ The notebook now defaults to 2×2 integration and runs `finish.py` after stackin
 The original `colour_quicklook.png` is a screening product; use the files in
 `finished/` for presentation. Native resolution remains available with binning=1.
 
+Tone and saturation defaults are selected per output palette. Adding RGB lights
+to an SHO/HOO session does not change its narrowband presentation settings;
+explicit settings still override every palette. The effective settings for each
+export are recorded under `palette_settings` in `render_report.json`.
+
 Finishing uses common low-emission sky anchors, star-excluded global diffuse
 scales, wavelet denoising, a fixed narrowband matrix, soft monotonic highlight
 compression, bounded saturation and modest luminance contrast. RGB balance uses

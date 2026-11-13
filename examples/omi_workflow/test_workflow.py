@@ -154,3 +154,32 @@ def test_common_crop_excludes_missing_coverage():
     crop=common_crop([a,np.ones_like(a)])
     y0,y1,x0,x1=crop
     assert np.isfinite(a[y0:y1,x0:x1]).all()
+
+
+@pytest.mark.parametrize('overrides',[None,{'saturation':1.3,'strength':7}])
+def test_mixed_filters_do_not_change_individual_palette_exports(tmp_path,overrides):
+    from finish import render
+    import tifffile
+    yy,xx=np.mgrid[:64,:80]
+    channels=['SII','Ha','OIII','R','G','B']
+    rng=np.random.default_rng(42)
+    for i,c in enumerate(channels):
+        a=(.05+(.3+.07*i)*np.exp(-((xx-30-i)**2+(yy-32)**2)/500)
+           +rng.normal(0,.002,xx.shape)).astype('float32')
+        fits.PrimaryHDU(a).writeto(tmp_path/f'master_{c}_bin4.fits')
+    def run(chosen,label):
+        report={'target':'test','binning':4,'output':str(tmp_path),
+                'channels':{c:{'status':'integrated'} for c in chosen}}
+        p={'channels':chosen,'crop_bin4':[8,56,8,72],
+           'backgrounds':{c:0 for c in chosen},'slopes':{c:[0,0] for c in chosen},
+           'scales':{c:1 for c in chosen},'rgb_gains':{c:1 for c in 'RGB'}}
+        return render(report,parameters=p,settings=overrides,output_name=label)
+    mixed=run(channels,'mixed')
+    run(channels[:3],'narrowband');run(channels[3:],'broadband')
+    for palette,group in [('SHO','narrowband'),('HOO','narrowband'),
+                          ('HOO_Amber_Blue','narrowband'),('RGB','broadband')]:
+        np.testing.assert_array_equal(tifffile.imread(tmp_path/'mixed'/f'{palette}_16bit.tif'),
+                                      tifffile.imread(tmp_path/group/f'{palette}_16bit.tif'))
+    if overrides:
+        for s in mixed['palette_settings'].values():
+            assert s['saturation']==overrides['saturation'] and s['strength']==overrides['strength']
