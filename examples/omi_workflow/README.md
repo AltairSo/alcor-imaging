@@ -50,6 +50,14 @@ to an SHO/HOO session does not change its narrowband presentation settings;
 explicit settings still override every palette. The effective settings for each
 export are recorded under `palette_settings` in `render_report.json`.
 
+For an optional softer presentation, run `soft_presentation.soften(finished_folder)`
+in Colab with these example modules on the Python path. It creates separate
+`SHO_Soft_Clouds` PNG/TIFF files, comparisons and a method report. It protects
+measured star profiles while smoothing diffuse luminance/chroma, applies a small
+cloud-contrast lift, then attenuates positive stellar excess by 23% (the default).
+This does not replace stars or alter the linear masters. Use `palette` and
+`star_reduction` arguments to select another existing presentation or strength.
+
 Finishing uses common low-emission sky anchors, star-excluded global diffuse
 scales, wavelet denoising, a fixed narrowband matrix, soft monotonic highlight
 compression, bounded saturation and modest luminance contrast. RGB balance uses
