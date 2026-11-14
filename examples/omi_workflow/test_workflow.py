@@ -10,6 +10,21 @@ import archive
 from quality import star_measurements, refine_field_metrics, inspect_one
 
 
+def test_reference_override_can_anchor_inspected_field():
+    from process import choose_reference
+    wrong={'path':'wrong-field-ha.fits','filter':'Ha','fwhm_px':2.0}
+    correct={'path':'correct-field-oiii.fits','filter':'OIII','fwhm_px':3.0}
+    assert choose_reference([wrong,correct],correct['path']) is correct
+    assert choose_reference([wrong,correct]) is wrong
+
+
+def test_reference_override_cannot_bypass_frame_selection():
+    from process import choose_reference
+    selected=[{'path':'accepted.fits','filter':'Ha','fwhm_px':3.0}]
+    with pytest.raises(ValueError,match='selected light frame'):
+        choose_reference(selected,'rejected.fits')
+
+
 @pytest.mark.parametrize('name',['../outside.fits','/absolute.fits','a/../../x','a\\..\\x'])
 def test_unsafe_paths(name):
     with pytest.raises(ValueError):archive.safe_relative(name)

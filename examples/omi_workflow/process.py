@@ -54,7 +54,22 @@ def compatible_key(r):
     return (tuple(r['shape']),r.get('camera'),r.get('gain'),r.get('offset'),r.get('bin_x'),r.get('bin_y'))
 
 
-def process_target(root,target,night=None,binning=4,backend='gpu',include_review=False):
+def choose_reference(selected, reference_path=None):
+    """Allow an inspected field to anchor registration after a pointing failure.
+
+    Sharp stars alone do not establish that an exposure contains the target.
+    An explicit reference must still be in the accepted, compatible selection.
+    All other exposures must pass the normal stellar registration checks.
+    """
+    if reference_path is not None:
+        matches=[r for r in selected if r['path']==str(reference_path)]
+        if len(matches)!=1:
+            raise ValueError('Reference path must identify exactly one selected light frame')
+        return matches[0]
+    return min(selected,key=lambda r:(r.get('filter') not in {'Ha','L'},r.get('fwhm_px') or 100))
+
+
+def process_target(root,target,night=None,binning=4,backend='gpu',include_review=False,reference_path=None):
     root=Path(root)
     rows=json.loads((root/'quality'/'frame_report.json').read_text())
     overrides=json.loads((root/'quality'/'overrides.json').read_text()) if (root/'quality'/'overrides.json').exists() else {}
@@ -71,11 +86,12 @@ def process_target(root,target,night=None,binning=4,backend='gpu',include_review
         raise ValueError('Incompatible detector/gain/geometry groups: process them separately')
     if binning not in {1,2,4}:raise ValueError('binning must be 1, 2 or 4')
     label=re.sub(r'[^A-Za-z0-9_-]+','_',target).strip('_')
-    run_hash=hashlib.sha256(json.dumps({'paths':sorted(r['path'] for r in selected),'binning':binning,'version':1},sort_keys=True).encode()).hexdigest()[:10]
+    ref=choose_reference(selected,reference_path)
+    run_hash=hashlib.sha256(json.dumps({'paths':sorted(r['path'] for r in selected),'binning':binning,
+                                      'reference':ref['path'],'version':2},sort_keys=True).encode()).hexdigest()[:10]
     out=root/'processed'/label/(str(night or 'compatible_nights')+f'_bin{binning}_{run_hash}')
     out.mkdir(parents=True,exist_ok=True)
     def cache(r):return np.load(root/'quality'/'cache'/(r['id']+'.npy'))
-    ref=min(selected,key=lambda r:(r.get('filter') not in {'Ha','L'},r.get('fwhm_px') or 100))
     ref_small=cache(ref);ref_cat=catalog(ref_small)
     grouped=defaultdict(list);registration=[]
     for r in sorted(selected,key=lambda r:r['path']):
@@ -114,7 +130,12 @@ def process_target(root,target,night=None,binning=4,backend='gpu',include_review
         head['HISTORY']='Scalar background removed; registered and sigma-clipped. No dark/flat correction.'
         fits.PrimaryHDU(master,header=head).writeto(out/(f'master_{filt}_bin{binning}.fits'),overwrite=True)
         display_mono(master,(1800,1800)).save(out/(f'master_{filt}_preview.png'))
-        integration[filt]={'status':'integrated','frames':len(items),'seconds':seconds,'weights':weights.tolist()}
+        by_night={}
+        for r,_ in items:
+            entry=by_night.setdefault(r['night'],{'frames':0,'seconds':0.})
+            entry['frames']+=1;entry['seconds']+=float(r['exposure'])
+        integration[filt]={'status':'integrated','frames':len(items),'seconds':seconds,
+                           'by_night':by_night,'weights':weights.tolist()}
         print('MASTER',filt,len(items),seconds,flush=True)
     palette=None
     if all(k in masters for k in ['SII','Ha','OIII']):channels=['SII','Ha','OIII'];palette='SHO mapped colour'
@@ -146,7 +167,9 @@ def process_target(root,target,night=None,binning=4,backend='gpu',include_review
     tifffile.imwrite(out/'colour_quicklook_16bit.tif',np.round(rendered*65535).astype('uint16'),photometric='rgb')
     fits.PrimaryHDU(valid.astype('uint8')).writeto(out/'common_coverage.fits',overwrite=True)
     report={'target':target,'night':night,'binning':binning,'backend':backend,'palette':palette,
-            'reference':ref['path'],'channels':integration,'display_gains':gains,'crop_xy':[x0,y0,x1,y1],
+            'reference':ref['path'],'reference_selection':'explicit' if reference_path else 'automatic_sharpness',
+            'observing_nights':sorted({r['night'] for items in grouped.values() if len(items)>=3 for r,_ in items}),
+            'channels':integration,'display_gains':gains,'crop_xy':[x0,y0,x1,y1],
             'limitations':['Lights only: no matching darks/flats supplied.','Quicklook uses global display balance, not measured filter transmission.',
                           'Scalar sky offsets only; gradients/halos may remain.','Candidate is a screening result, not guaranteed production suitability.'],
             'selection':{'include_review':include_review,'overrides':overrides},'output':str(out)}

@@ -82,6 +82,13 @@ Rebuild the embedded notebook after changing sources:
 python examples/omi_workflow/build_notebook.py
 ```
 
+If sharp exposures contain the wrong star field, inspect the pointing and pass
+`reference_path` to `process_target` (or set `REFERENCE_PATH` in the notebook).
+The path must belong to a selected, compatible light frame; every other frame
+still has to pass stellar registration. The reference is part of the run hash.
+Using `night=None` combines compatible archived nights, with frame counts and
+exposure seconds per night retained under each channel's `by_night` report.
+
 Validation (run in Colab):
 
 ```bash

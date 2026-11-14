@@ -27,6 +27,7 @@ NEW_NIGHT_LINK = "" #@param {type:"string"}
 NEW_NIGHT_LABEL = "" #@param {type:"string"}
 TARGET = "Heart Nebula" #@param {type:"string"}
 OBSERVING_NIGHT = "2026-11-01" #@param {type:"string"}
+REFERENCE_PATH = "" #@param {type:"string"}
 BINNING = 2 #@param [1, 2, 4] {type:"raw"}
 RUN_PROCESSING = True #@param {type:"boolean"}
 FINISH_IMAGES = True #@param {type:"boolean"}
@@ -107,7 +108,7 @@ print('Report:',ROOT/'QUALITY_REPORT.md')
 ''',True)
     md('''### Integrate and render
 
-The default **2×2 binning** produces presentation masters. Use **1** for native resolution or **4** for faster review. Registration must pass star-match, residual and scale checks. Different camera/gain/geometry groups are not silently mixed. At least three registered frames per channel are required.
+The default **2×2 binning** produces presentation masters. Use **1** for native resolution or **4** for faster review. Registration must pass star-match, residual and scale checks. Different camera/gain/geometry groups are not silently mixed. At least three registered frames per channel are required. Sharp stars alone do not confirm pointing: after inspecting a mismatched field, set **REFERENCE_PATH** to the accepted exposure's relative raw path. Leave it blank for automatic selection. A blank observing night combines compatible archived sessions; actual contributions per night are recorded for each filter.
 
 The screening quicklook is saved separately. Finishing restores the earlier B20 method: common sky anchors, star-excluded diffuse scales, wavelet noise reduction, global colour matrices, soft highlights and modest luminance contrast. Linear masters remain unchanged.
 
@@ -115,7 +116,7 @@ HOO and its amber/blue alternative both use only Hα and OIII; SHO requires meas
     code('''#@title 6. Process the chosen target on the GPU and save results
 from process import process_target
 if RUN_PROCESSING:
-    result=process_target(ROOT,TARGET,night=OBSERVING_NIGHT or None,binning=int(BINNING),backend='gpu')
+    result=process_target(ROOT,TARGET,night=OBSERVING_NIGHT or None,binning=int(BINNING),backend='gpu',reference_path=REFERENCE_PATH or None)
     print(json.dumps(result,indent=2))
     print('Results:',result['output'])
     preview=Path(result['output'])/'colour_quicklook.png'
