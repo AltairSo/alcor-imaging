@@ -96,6 +96,13 @@ PNG/TIFF exports, a detail comparison, and a parameter report. It is not enabled
 by default: compare a real crop first, because stronger smoothing also suppresses
 faint small-scale signal. Original presentations and linear masters are retained.
 
+`smooth_hd.smooth_hd` provides a stronger optional presentation for users who
+prefer smoother clouds: compact measured stellar cores are protected, while
+surrounding grain receives stronger non-local means filtering. It saves a
+separate native-size PNG/TIFF and a full-field, aspect-preserving HD downsample,
+plus a same-scale comparison and parameters. It does not create extra resolution
+or claim complete noise removal; faint small-scale detail is also softened.
+
 Validation (run in Colab):
 
 ```bash
