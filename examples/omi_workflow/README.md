@@ -89,6 +89,13 @@ still has to pass stellar registration. The reference is part of the run hash.
 Using `night=None` combines compatible archived nights, with frame counts and
 exposure seconds per night retained under each channel's `by_night` report.
 
+For inspected residual correlated grain, `clean_presentation.clean_grain`
+can follow the optional soft-cloud pass. It applies joint RGB non-local means
+only outside measured stellar cores and writes separate `*_Clean_Clouds`
+PNG/TIFF exports, a detail comparison, and a parameter report. It is not enabled
+by default: compare a real crop first, because stronger smoothing also suppresses
+faint small-scale signal. Original presentations and linear masters are retained.
+
 Validation (run in Colab):
 
 ```bash
